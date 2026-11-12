@@ -1,6 +1,7 @@
 // One agent session in the UI: its conversation entries, plan cards, waiting state and the
 // live scope guard. Fed by `session` events from Rust.
 import type { SessionEvent } from "../api";
+import { t } from "../i18n";
 import type {
   AgentCommand,
   ConfigOption,
@@ -64,7 +65,15 @@ export interface SavedSession {
   updated: number;
   /** Agent id ("claude", "codex", ...). Missing in sessions saved before agents could be chosen. */
   agent?: string;
+  /** "pane" for the agent's own TUI. Missing means chat. For a pane, `acpId` is FocusIDE's own id. */
+  mode?: SessionMode;
 }
+
+/** Chat: FocusIDE's own UI over ACP. Pane: the agent's own TUI in a terminal in the center. */
+export type SessionMode = "chat" | "pane";
+
+/** Turn tracking in a pane. "otherRunning": another session held the project, so the turn is not tracked. */
+export type Tracking = "off" | "on" | "otherRunning" | "error";
 
 export class Session {
   key: string;
@@ -76,8 +85,13 @@ export class Session {
   planMode = $state(true);
   /** Why Claude did not start in chat mode: a Claude plan login, or not signed in at all. */
   access = $state<"subscription" | "signedOut" | null>(null);
-  /** Where that login can run instead (agent::ClaudeRoute). Today only the terminal drawer. */
-  route = $state<"terminal" | null>(null);
+  /** Where that login can run instead (agent::ClaudeRoute): a Claude pane. */
+  route = $state<"pane" | null>(null);
+  mode = $state<SessionMode>("chat");
+  /** Pane: the agent's TUI runs. */
+  paneAlive = $state(false);
+  tracking = $state<Tracking>("off");
+  trackingError = $state<string | null>(null);
   name = $state("");
   renamed = $state(false);
   status = $state<Status>("idle");
@@ -115,6 +129,7 @@ export class Session {
       this.created = saved.created;
       this.updated = saved.updated;
       this.agent = saved.agent ?? "claude";
+      this.mode = saved.mode ?? "chat";
     }
   }
 
@@ -124,6 +139,7 @@ export class Session {
 
   /** True while this session holds its project for a turn that can change files. */
   get claims(): boolean {
+    if (this.mode === "pane") return this.tracking === "on";
     if (!this.running) return false;
     const p = this.entries.findLast((x) => x.t === "plan" && x.turnId === this.turnId);
     return !(p && p.t === "plan" && (p.state === "planning" || p.state === "waiting"));
@@ -158,6 +174,7 @@ export class Session {
       created: this.created,
       updated: this.updated,
       agent: this.agent,
+      mode: this.mode,
     };
   }
 
@@ -203,6 +220,7 @@ export class Session {
 
   /** Applies one event. Returns what changed for the app (waiting and notifications). */
   handle(e: SessionEvent): Waiting | "none" {
+    if (this.mode === "pane") return this.handlePane(e);
     switch (e.kind) {
       case "starting":
         this.status = "starting";
@@ -228,7 +246,7 @@ export class Session {
         // Chat mode does not offer a Claude account sign-in (see agent::ClaudeRoute).
         this.status = "claudeAccess";
         this.access = "signedOut";
-        this.route = "terminal";
+        this.route = "pane";
         return "none";
       case "claude_route":
         this.status = "claudeAccess";
@@ -473,6 +491,44 @@ export class Session {
     const w: Waiting = failed ? "failed" : "done";
     this.waiting = w;
     return w;
+  }
+
+  /** Events of a pane session. Turns come from Checkpoint and pane exit (see pane.rs). */
+  private handlePane(e: SessionEvent): Waiting | "none" {
+    switch (e.kind) {
+      case "pane_started":
+        this.status = "ready";
+        this.paneAlive = true;
+        break;
+      case "pane_exited":
+        this.paneAlive = false;
+        this.tracking = "off";
+        this.turnId = null;
+        break;
+      case "turn_started":
+        this.tracking = "on";
+        this.trackingError = null;
+        this.turnId = e.turnId;
+        break;
+      case "turn_untracked":
+        this.tracking = e.reason === "otherRunning" ? "otherRunning" : "error";
+        this.trackingError = e.error ?? null;
+        break;
+      case "turn_ended": {
+        const r = e as unknown as TurnResult;
+        this.tracking = "off";
+        this.turnId = null;
+        this.updated = Date.now();
+        if (r.hasSnapshot && (r.changes?.files.length || r.changes?.generated.length)) {
+          this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
+        } else if (!r.snapshotError && e.reason === "checkpoint") {
+          this.note(t("pane.noChanges"));
+        }
+        if (r.snapshotError) this.note(t("changes.snapshotFailed", { error: r.snapshotError }), "error");
+        break;
+      }
+    }
+    return "none";
   }
 
   /** Out-of-plan rows for a plan card or a changes card, from the real disk diff. */

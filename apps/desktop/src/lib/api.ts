@@ -8,6 +8,13 @@ export interface AgentInfo {
   name: string;
   path: string | null;
   install: string;
+  /** The agent's own TUI is installed, so it can open in a pane. */
+  tui: boolean;
+}
+
+export interface ClaudeRouteInfo {
+  access: "allowed" | "subscription" | "signedOut";
+  route: "chat" | "pane";
 }
 
 export interface EnvCheck {
@@ -31,8 +38,10 @@ export const api = {
 
   agentList: () => invoke<AgentInfo[]>("agent_list"),
   adapterDownload: () => invoke<string>("adapter_download"),
-  sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string) =>
-    invoke<string>("session_start", { projectId, resume, agentId, customCommand }),
+  sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string, mode: "chat" | "pane" = "chat") =>
+    invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode }),
+  sessionCheckpoint: (key: string) => invoke<void>("session_checkpoint", { key }),
+  claudeRoute: () => invoke<ClaudeRouteInfo | null>("claude_route"),
   sessionPrompt: (key: string, blocks: unknown[], planFirst: boolean, continueTurn: string | null = null) =>
     invoke<string>("session_prompt", { key, blocks, planFirst, continueTurn }),
   sessionAnswer: (key: string, requestId: string, optionId: string) =>

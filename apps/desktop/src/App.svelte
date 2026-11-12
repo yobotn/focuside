@@ -21,6 +21,7 @@
   import TerminalDrawer from "./lib/components/TerminalDrawer.svelte";
   import Splitter from "./lib/components/Splitter.svelte";
   import ClaudeAccess from "./lib/components/ClaudeAccess.svelte";
+  import AgentPane from "./lib/components/AgentPane.svelte";
   import { reportIssue, updates } from "./lib/updates.svelte";
   import { defaultLayout, type Side } from "./lib/stores/app.svelte";
 
@@ -48,7 +49,20 @@
 
   // Overlays that need data.
   $effect(() => {
-    if (app.overlay === "palette" && !app.agents.length) app.loadAgents();
+    if ((app.overlay === "palette" || app.overlay === "new") && !app.agents.length) app.loadAgents();
+  });
+
+  // New session menu: chat or pane for each installed agent.
+  const newItems = $derived.by<ListItem[]>(() => {
+    const items: ListItem[] = [];
+    for (const a of app.agents) {
+      if (!a.path) continue;
+      items.push({ id: `chat-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), run: () => app.newSession(undefined, a.id, "chat") });
+      if (a.tui) items.push({ id: `pane-${a.id}`, label: t("cmd.openPane", { name: a.name }), run: () => app.newSession(undefined, a.id, "pane") });
+    }
+    if (app.settings.agent === "custom")
+      items.push({ id: "chat-custom", label: t("cmd.newSessionWith", { name: t("agent.custom") }), run: () => app.newSession(undefined, "custom", "chat") });
+    return items;
   });
   $effect(() => {
     if (app.overlay === "openFile" && project) allFiles(project.id, true).then((f) => (files = f));
@@ -145,8 +159,11 @@
     ];
     for (const a of app.agents) {
       if (a.path && a.id !== app.settings.agent)
-        items.push({ id: `new-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), run: () => app.newSession(undefined, a.id) });
+        items.push({ id: `new-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), run: () => app.newSession(undefined, a.id, "chat") });
+      if (a.path && a.tui)
+        items.push({ id: `pane-${a.id}`, label: t("cmd.openPane", { name: a.name }), run: () => app.newSession(undefined, a.id, "pane") });
     }
+    if (s?.mode === "pane" && s.paneAlive) items.unshift({ id: "checkpoint", label: t("cmd.checkpoint"), run: () => app.checkpoint(s) });
     if (s?.running) items.unshift({ id: "stop", label: t("cmd.stop"), hint: keyLabel("Mod+."), run: () => app.stop(s) });
     const lastDone = s?.entries.findLast((e) => (e.t === "changes" || (e.t === "plan" && ["done", "paused", "failed"].includes(e.state))) && !e.undo);
     if (s && lastDone && (lastDone.t === "changes" || lastDone.t === "plan"))
@@ -260,7 +277,9 @@
     {#each leftPanels as p (p)}{@render panel(p, "right")}{/each}
     <main class="center">
       <IdentityBar />
-      {#if session}
+      {#if session && session.mode === "pane"}
+        {#key session.key}<AgentPane {session} {project} />{/key}
+      {:else if session}
         {#if session.status === "claudeAccess"}
           <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><ClaudeAccess {session} /></div>
         {:else if app.envProblem}
@@ -300,6 +319,8 @@
   <ListOverlay title={t("queue.title")} items={queueItems} searchable={false} empty={t("queue.empty")} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "sessions"}
   <ListOverlay placeholder={t("session.list")} items={savedList} empty={t("session.listEmpty")} onclose={() => (app.overlay = null)} />
+{:else if app.overlay === "new"}
+  <ListOverlay placeholder={t("session.new")} items={newItems} empty={t("palette.empty")} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "palette"}
   <ListOverlay placeholder={t("palette.placeholder")} items={paletteItems} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "openFile"}

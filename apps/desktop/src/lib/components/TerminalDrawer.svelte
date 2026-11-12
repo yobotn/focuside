@@ -2,14 +2,16 @@
   import { onDestroy, onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { Terminal } from "@xterm/xterm";
+  import type { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
-  import "@xterm/xterm/css/xterm.css";
   import { X } from "phosphor-svelte";
   import { t } from "../i18n";
   import { keyLabel } from "../platform";
   import { app, type Project } from "../stores/app.svelte";
-  import { isDark } from "../theme.svelte";
+  import { decode, newTerminal } from "../xterm";
+
+  // The shell drawer. "Run in terminal" (install commands) types into this shell only, never
+  // into an agent pane (see AgentPane and stores/paneterm).
 
   let { project }: { project: Project } = $props();
 
@@ -21,24 +23,6 @@
   let unlisten: UnlistenFn[] = [];
   let ro: ResizeObserver | null = null;
 
-  function colors() {
-    const css = getComputedStyle(document.documentElement);
-    const v = (n: string) => css.getPropertyValue(n).trim();
-    return {
-      background: v("--bg-sunken"),
-      foreground: v("--fg"),
-      cursor: v("--fg"),
-      selectionBackground: isDark() ? "#3f3f46" : "#d4d4d8",
-    };
-  }
-
-  function decode(b64: string): Uint8Array {
-    const bin = atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
-
   async function start() {
     if (!term || !fit) return;
     exited = false;
@@ -49,6 +33,7 @@
         cols: term.cols,
         rows: term.rows,
         shell: app.settings.shell || null,
+        session: null,
       });
       if (app.terminalCommand) {
         const cmd = app.terminalCommand;
@@ -61,15 +46,7 @@
   }
 
   onMount(async () => {
-    term = new Terminal({
-      fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
-      fontSize: 13,
-      lineHeight: 1.2,
-      cursorBlink: true,
-      allowProposedApi: false,
-      theme: colors(),
-      scrollback: 5000,
-    });
+    term = newTerminal();
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host!);

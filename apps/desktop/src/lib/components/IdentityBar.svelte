@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { GitBranch, Plus, X } from "phosphor-svelte";
+  import { CaretDown, GitBranch, Plus, X } from "phosphor-svelte";
   import { t } from "../i18n";
   import { keyLabel } from "../platform";
   import { app } from "../stores/app.svelte";
   import { updates } from "../updates.svelte";
 
   function restart() {
-    if (app.projects.some((pr) => pr.sessions.some((x) => x.running))) {
+    if (app.projects.some((pr) => pr.sessions.some((x) => x.running || x.paneAlive))) {
       app.flash(t("update.busy"), "error");
       return;
     }
@@ -76,6 +76,9 @@
     {/if}
     <button class="icon-btn" title={t("session.new")} aria-label={t("session.new")} onclick={() => app.newSession()}>
       <Plus size={14} />
+    </button>
+    <button class="icon-btn" title={t("session.newMenu")} aria-label={t("session.newMenu")} onclick={() => (app.overlay = "new")}>
+      <CaretDown size={12} />
     </button>
     {#if s && p.sessions.length > 1}
       <button class="icon-btn" title={t("common.close")} aria-label={t("common.close")} onclick={() => app.closeSession(s.key)}>

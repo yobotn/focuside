@@ -4,10 +4,21 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { api, errText, onAdapterDownload, onOpenPaths, onSessionEvent, type AgentInfo, type EnvCheck, type SessionEvent } from "../api";
+import {
+  api,
+  errText,
+  onAdapterDownload,
+  onOpenPaths,
+  onSessionEvent,
+  type AgentInfo,
+  type ClaudeRouteInfo,
+  type EnvCheck,
+  type SessionEvent,
+} from "../api";
 import { t } from "../i18n";
 import type { Entry, ProjectInfo, UndoOutcome, Waiting } from "../types";
-import { Session, type SavedSession } from "./session.svelte";
+import { Session, type SavedSession, type SessionMode } from "./session.svelte";
+import { paneTerms } from "./paneterm.svelte";
 import { applyTheme, type Theme } from "../theme.svelte";
 import { updates } from "../updates.svelte";
 
@@ -66,7 +77,7 @@ export interface Project extends ProjectInfo {
   activeKey: string | null;
 }
 
-export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "search" | "settings" | "model";
+export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "search" | "settings" | "model" | "new";
 
 class AppStore {
   ready = $state(false);
@@ -76,6 +87,9 @@ class AppStore {
   adapterError = $state<string | null>(null);
   /** A Claude session that could not start because the adapter was missing. It starts after the download. */
   private adapterWaiting = $state<{ resume?: SavedSession; agentId?: string } | null>(null);
+  /** How Claude Code is signed in, as a route (agent::ClaudeRoute). Undefined until checked. */
+  claudeRoute = $state<ClaudeRouteInfo | null | undefined>(undefined);
+  private routeCheck: Promise<ClaudeRouteInfo | null> | null = null;
   projects = $state<Project[]>([]);
   activeId = $state<string | null>(null);
   overlay = $state<Overlay>(null);
@@ -146,6 +160,7 @@ class AppStore {
       document.documentElement.style.setProperty("--read-size", `${this.settings.fontSize}px`);
       this.env = await api.envCheck();
       this.loadAgents();
+      if (this.env.claude) this.checkClaudeRoute();
       await onSessionEvent((e) => this.onEvent(e));
       await onOpenPaths((paths) => paths.forEach((p) => this.openPath(p)));
       const w = getCurrentWindow();
@@ -273,7 +288,10 @@ class AppStore {
     if (!p) return;
     this.saveNow();
     await api.projectClose(id).catch(() => {});
-    for (const s of p.sessions) this.sessionsByKey.delete(s.key);
+    for (const s of p.sessions) {
+      this.sessionsByKey.delete(s.key);
+      if (s.mode === "pane") paneTerms.dispose(s.key);
+    }
     this.projects = this.projects.filter((x) => x.id !== id);
     if (this.activeId === id) this.activeId = this.projects[0]?.id ?? null;
     this.updateTitle();
@@ -289,9 +307,31 @@ class AppStore {
     this.agents = await api.agentList().catch(() => []);
   }
 
-  /** The adapter is missing and a Claude session needs it. */
+  /** The adapter is missing and a Claude chat session needs it. A Claude pane does not need it. */
   get needsAdapter(): boolean {
-    return !!this.env && !this.env.adapter && (this.settings.agent === "claude" || !!this.adapterWaiting);
+    const claudeChat = this.settings.agent === "claude" && this.claudeRoute?.route !== "pane";
+    return !!this.env && !this.env.adapter && (claudeChat || !!this.adapterWaiting);
+  }
+
+  /** Runs `claude auth status` once (or again with `force`) and keeps the route. */
+  checkClaudeRoute(force = false): Promise<ClaudeRouteInfo | null> {
+    if (force || !this.routeCheck) {
+      this.routeCheck = api
+        .claudeRoute()
+        .catch(() => null)
+        .then((r) => {
+          this.claudeRoute = r;
+          return r;
+        });
+    }
+    return this.routeCheck;
+  }
+
+  /** Chat for an API key or a cloud provider; a Claude pane for a Claude plan login or no login. */
+  private async claudeMode(): Promise<SessionMode> {
+    if (!this.env?.claude) return "chat";
+    const r = await this.checkClaudeRoute();
+    return r?.route === "pane" ? "pane" : "chat";
   }
 
   /** Something the user has to install or download before a session can start. */
@@ -327,7 +367,11 @@ class AppStore {
     return this.agents.find((a) => a.id === id)?.name ?? id;
   }
 
-  async newSession(resume?: SavedSession, agentId?: string) {
+  /**
+   * Starts a session. `mode` "pane" opens the agent's own TUI. Without a mode: a resumed
+   * session keeps its mode, Claude follows its login (see claudeMode), other agents use chat.
+   */
+  async newSession(resume?: SavedSession, agentId?: string, mode?: SessionMode) {
     const p = this.active;
     if (!p) return;
     if (resume) {
@@ -339,11 +383,22 @@ class AppStore {
     }
     try {
       const agent = resume?.agent ?? agentId ?? this.settings.agent;
-      const key = await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
+      const m: SessionMode = resume ? (resume.mode ?? "chat") : (mode ?? (agent === "claude" ? await this.claudeMode() : "chat"));
+      if (this.active !== p) return;
+      const key =
+        m === "pane"
+          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane")
+          : await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
       const s = new Session(key, p.id, p.root, resume);
       s.agent = agent;
+      s.mode = m;
       s.status = "starting";
-      s.replaying = !!resume;
+      s.replaying = !!resume && m === "chat";
+      if (m === "pane" && !resume) {
+        // A pane has no ACP session id. FocusIDE's own id lets the sessions list reopen it.
+        s.acpId = `pane-${key}`;
+        s.name = t("pane.name", { agent: this.agentName(agent) });
+      }
       this.sessionsByKey.set(key, s);
       p.sessions.push(s);
       p.activeKey = key;
@@ -384,6 +439,7 @@ class AppStore {
     if (!p) return;
     this.saveNow();
     await api.sessionClose(key).catch(() => {});
+    paneTerms.dispose(key);
     p.sessions = p.sessions.filter((s) => s.key !== key);
     this.sessionsByKey.delete(key);
     if (p.activeKey === key) p.activeKey = p.sessions[p.sessions.length - 1]?.key ?? null;
@@ -414,6 +470,7 @@ class AppStore {
   }
 
   private onEvent(e: SessionEvent) {
+    if (e.kind === "claude_route") this.claudeRoute = { access: e.access, route: e.route };
     const s = this.sessionFor(e.key);
     if (!s) return;
     const w = s.handle(e);
@@ -421,7 +478,7 @@ class AppStore {
       s.replaying = false;
       this.save();
     }
-    if (e.kind === "turn_ended") this.save();
+    if (e.kind === "turn_ended" || e.kind === "pane_started") this.save();
     if (w !== "none" && w) this.notifyWaiting(s, w);
     this.clearSeen();
     this.updateTitle();
@@ -513,7 +570,8 @@ class AppStore {
   }
 
   async stop(s: Session | undefined = this.session) {
-    if (!s || !s.running) return;
+    // A pane has no Stop: the user stops the agent in its own TUI.
+    if (!s || !s.running || s.mode === "pane") return;
     s.stopping = true;
     await api.sessionCancel(s.key).catch((e) => this.flash(errText(e), "error"));
   }
@@ -550,6 +608,30 @@ class AppStore {
     const { e } = this.entryOf(target);
     if (e && (e.t === "plan" || e.t === "changes")) e.undo = { outcome };
     this.lastUndo = target;
+    // Chat sessions tell the agent in the next prompt. A pane gets nothing typed in, so the
+    // user is told instead.
+    const s = this.sessionFor(target.sessionKey);
+    if (s?.mode === "pane") s.note(t("pane.undoNote", { agent: this.agentName(s.agent) }), "warn");
+  }
+
+  /** Checkpoint in a pane: the turn ends (changes card) and the next one starts. */
+  async checkpoint(s: Session) {
+    if (s.mode !== "pane") return;
+    try {
+      await api.sessionCheckpoint(s.key);
+    } catch (e) {
+      this.flash(errText(e), "error");
+    }
+  }
+
+  /** A chat session that was routed (Claude plan login): replace it with a Claude pane. */
+  async openPaneInstead(s: Session) {
+    if (s.access) this.claudeRoute = { access: s.access, route: "pane" };
+    const agent = s.agent;
+    const p = this.projects.find((x) => x.id === s.projectId);
+    if (p && this.activeId !== p.id) this.activate(p.id);
+    await this.closeSession(s.key);
+    await this.newSession(undefined, agent, "pane");
   }
 
   async redo() {
@@ -569,6 +651,7 @@ class AppStore {
   async resumeAgent(s: Session) {
     try {
       s.status = "starting";
+      if (s.agent === "claude") this.checkClaudeRoute(true);
       await api.sessionResume(s.key);
     } catch (e) {
       const msg = errText(e);
@@ -580,12 +663,8 @@ class AppStore {
     }
   }
 
-  /** Opens the terminal drawer without typing anything into it. */
-  openTerminal() {
-    this.terminalVisible = true;
-  }
-
-  /** Opens the terminal drawer and runs a command there (install commands, claude sign-in). */
+  /** Opens the terminal drawer and runs a command in its shell (install commands). Never used
+   * for agent panes: FocusIDE does not type into an agent's TUI. */
   runInTerminal(command: string) {
     this.terminalVisible = true;
     this.terminalCommand = command;
