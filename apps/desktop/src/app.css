@@ -119,6 +119,43 @@
   --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace;
 }
 
+/* Syntax colors for the editor: muted, readable in both themes. */
+:root {
+  --syn-keyword: #a626a4;
+  --syn-string: #2f7d32;
+  --syn-number: #b35c00;
+  --syn-comment: #8a8a93;
+  --syn-func: #2f5fb3;
+  --syn-type: #9a6a00;
+  --syn-tag: #c0362c;
+  --syn-prop: #3b6d8c;
+  --syn-def: #18181b;
+}
+:root[data-theme="dark"] {
+  --syn-keyword: #c792ea;
+  --syn-string: #a5d6a7;
+  --syn-number: #f0a868;
+  --syn-comment: #7a7a84;
+  --syn-func: #82aaff;
+  --syn-type: #e6c07b;
+  --syn-tag: #f07178;
+  --syn-prop: #89c4e1;
+  --syn-def: #f4f4f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --syn-keyword: #c792ea;
+    --syn-string: #a5d6a7;
+    --syn-number: #f0a868;
+    --syn-comment: #7a7a84;
+    --syn-func: #82aaff;
+    --syn-type: #e6c07b;
+    --syn-tag: #f07178;
+    --syn-prop: #89c4e1;
+    --syn-def: #f4f4f5;
+  }
+}
+
 :root {
   /* The system font, so the app feels native on each OS. */
   --ui-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text",

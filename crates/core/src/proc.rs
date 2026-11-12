@@ -115,6 +115,41 @@ impl ProcessTree {
     }
 }
 
+/// A tree rooted at a process someone else started (the terminal shell from a PTY library).
+pub struct PidTree {
+    #[allow(dead_code)]
+    pid: u32,
+    #[cfg(windows)]
+    job: Option<win::Job>,
+}
+
+impl PidTree {
+    /// Puts `pid` in a kill-on-close job (Windows). On Unix the process must lead its own
+    /// group (PTY children do: they call setsid).
+    pub fn attach(pid: u32) -> Self {
+        #[cfg(windows)]
+        {
+            let job = win::Job::new().ok().filter(|j| j.assign_pid(pid).is_ok());
+            Self { pid, job }
+        }
+        #[cfg(unix)]
+        {
+            Self { pid }
+        }
+    }
+
+    pub fn kill(&self) {
+        #[cfg(windows)]
+        if let Some(j) = &self.job {
+            j.terminate();
+        }
+        #[cfg(unix)]
+        unsafe {
+            libc::killpg(self.pid as i32, libc::SIGKILL);
+        }
+    }
+}
+
 /// True if a process with this id is running.
 pub fn is_alive(pid: u32) -> bool {
     #[cfg(windows)]
@@ -178,6 +213,19 @@ mod win {
                 }
             }
             Ok(())
+        }
+
+        pub fn assign_pid(&self, pid: u32) -> std::io::Result<()> {
+            use windows_sys::Win32::System::Threading::{PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+            unsafe {
+                let h = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+                if h.is_null() {
+                    return Err(std::io::Error::last_os_error());
+                }
+                let r = self.assign(h);
+                CloseHandle(h);
+                r
+            }
         }
 
         pub fn terminate(&self) {

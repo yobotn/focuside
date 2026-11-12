@@ -2,7 +2,9 @@
 
 pub mod acp;
 pub mod agent;
+pub mod files;
 pub mod plan;
 pub mod proc;
 pub mod project;
+pub mod snapshot;
 pub mod which;

@@ -51,6 +51,9 @@ jobs:
       - name: Install UI dependencies
         run: npm --prefix apps/desktop ci
 
+      - name: File icons
+        run: node scripts/build-icons.mjs
+
       - name: Build UI
         run: npm --prefix apps/desktop run build
 
