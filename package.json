@@ -1,0 +1,16 @@
+{
+  "name": "focuside",
+  "private": true,
+  "description": "The simplest IDE for working with AI agents.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "setup": "npm --prefix apps/desktop install",
+    "dev": "npm --prefix apps/desktop run tauri:dev",
+    "build": "npm --prefix apps/desktop run tauri:build",
+    "icons": "node scripts/build-icons.mjs",
+    "test": "cargo test --workspace",
+    "spike": "cargo run -q -p focuside-spike --",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all --check && node scripts/text-lint.mjs && node scripts/i18n-check.mjs && npm --prefix apps/desktop run check",
+    "lint:text": "node scripts/text-lint.mjs"
+  }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "focuside-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FocusIDE core: agents over ACP, process trees, shadow snapshots, plan parser, files"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
