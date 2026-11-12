@@ -84,6 +84,71 @@ pub fn claude_command() -> Result<AgentCommand, Missing> {
     })
 }
 
+/// How the user's Claude Code is signed in, from its own `claude auth status --json`. Only the
+/// method and provider are read; no credential or account detail leaves Claude Code.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeAuth {
+    pub logged_in: bool,
+    /// For example "api_key", "third_party" or "claude.ai".
+    pub method: String,
+    /// "firstParty", "bedrock", "vertex", "foundry".
+    pub provider: String,
+}
+
+/// Anthropic does not allow apps built on the Claude Agent SDK (the bundled adapter is one) to
+/// use Claude subscription plans unless approved. FocusIDE starts Claude only with an API key
+/// (ANTHROPIC_API_KEY or apiKeyHelper) or a cloud provider. See
+/// https://code.claude.com/docs/en/legal-and-compliance (Authentication and credential use).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClaudeAccess {
+    Allowed,
+    /// Signed in with a Claude.ai account (Free, Pro, Max, Team, Enterprise) or its OAuth token.
+    Subscription,
+    SignedOut,
+}
+
+impl ClaudeAuth {
+    pub fn parse(json: &Value) -> Self {
+        let s = |k: &str| json[k].as_str().unwrap_or_default().to_string();
+        ClaudeAuth {
+            logged_in: json["loggedIn"].as_bool().unwrap_or(false),
+            method: s("authMethod"),
+            provider: s("apiProvider"),
+        }
+    }
+
+    pub fn access(&self) -> ClaudeAccess {
+        if !self.logged_in {
+            return ClaudeAccess::SignedOut;
+        }
+        let m = self.method.to_ascii_lowercase();
+        let first_party = self.provider.is_empty() || self.provider == "firstParty";
+        if first_party && (m.contains("claude.ai") || m.contains("oauth") || m.is_empty()) {
+            return ClaudeAccess::Subscription;
+        }
+        ClaudeAccess::Allowed
+    }
+}
+
+/// Runs `claude auth status --json` with the agent's environment.
+pub async fn claude_auth(claude: &Path, env: &[(String, String)]) -> anyhow::Result<ClaudeAuth> {
+    let mut cmd = tokio::process::Command::new(claude);
+    cmd.args(["auth", "status", "--json"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    crate::proc::prepare(&mut cmd);
+    let out = tokio::time::timeout(std::time::Duration::from_secs(20), cmd.output()).await??;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let start = text.find('{').unwrap_or(0);
+    let json: Value = serde_json::from_str(&text[start..])?;
+    Ok(ClaudeAuth::parse(&json))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Missing {
@@ -131,7 +196,7 @@ pub struct AgentSpec {
 pub const AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: "claude",
-        name: "Claude Code",
+        name: "Claude",
         program: "claude",
         args: &[],
         install: "npm install -g @anthropic-ai/claude-code",
@@ -309,6 +374,49 @@ mod tests {
             vec![r"C:\Program Files\x\agent.exe", "acp", "--flag", "a b", ""]
         );
         assert!(split_command("   ").is_empty());
+    }
+
+    #[test]
+    fn claude_access_rules() {
+        let a = |j: Value| ClaudeAuth::parse(&j).access();
+        assert_eq!(
+            a(json!({"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty"})),
+            ClaudeAccess::Subscription
+        );
+        assert_eq!(
+            a(json!({"loggedIn": true, "authMethod": "oauth_token", "apiProvider": "firstParty"})),
+            ClaudeAccess::Subscription
+        );
+        assert_eq!(
+            a(json!({"loggedIn": true, "authMethod": "api_key", "apiProvider": "firstParty"})),
+            ClaudeAccess::Allowed
+        );
+        assert_eq!(
+            a(json!({"loggedIn": true, "authMethod": "third_party", "apiProvider": "bedrock"})),
+            ClaudeAccess::Allowed
+        );
+        assert_eq!(a(json!({"loggedIn": false})), ClaudeAccess::SignedOut);
+    }
+
+    /// Runs the real `claude auth status` on this machine: `cargo test -- --ignored real_claude`.
+    #[tokio::test]
+    #[ignore]
+    async fn real_claude_access() {
+        let claude = locate_claude().expect("claude on PATH");
+        let auth = claude_auth(&claude, &[]).await.unwrap();
+        println!(
+            "method={} provider={} access={:?}",
+            auth.method,
+            auth.provider,
+            auth.access()
+        );
+        let with_key = claude_auth(
+            &claude,
+            &[("ANTHROPIC_API_KEY".into(), "sk-ant-test-not-real".into())],
+        )
+        .await
+        .unwrap();
+        assert_eq!(with_key.access(), ClaudeAccess::Allowed);
     }
 
     #[test]

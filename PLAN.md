@@ -518,11 +518,29 @@ The owner asked for three things after the first build: more agents than Claude,
 - **Panels.** The file tree, viewer and terminal resize by dragging the 1 px divider (arrow keys also work; double-click resets). The file tree and viewer each move to the other side with the arrows button in their header or from the palette ("Move file tree/viewer to the other side", "Reset panel layout"). Sizes and sides are saved. The conversation keeps at least 360 px.
 - **State file safety.** A `state.json` that does not parse (a hand edit with a BOM wiped the test machine's recent list) is now kept as `state.json.bad`. The app falls back to `state.json.bak`, which every save keeps one version of.
 
+### Anthropic policy check (2026-11-12)
+
+Sources read: code.claude.com/docs/en/legal-and-compliance and code.claude.com/docs/en/agent-sdk/overview.
+
+- Allowed, in plain words: an end user signs in to the unmodified Claude Code binary with their own subscription ("Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription"). FocusIDE runs the user's own `claude` binary and never touches credentials. Sign-in happens in Claude Code's own flow.
+- The risk: the bundled adapter (`claude-agent-acp`) is built on the Claude Agent SDK. The Agent SDK page says: "Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK." The legal page says developers building on the Agent SDK "should use API key authentication", and may not "route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users". Anthropic "may enforce these restrictions without prior notice".
+- So: a user with an API key (`ANTHROPIC_API_KEY`) or a cloud provider is clearly fine. A user on a Pro or Max subscription through FocusIDE is a grey area, and it is the user's account that would be affected.
+- Branding: we may say in plain text that FocusIDE runs or works with Claude Code. We may not use Anthropic or Claude Code names or logos as our product name, in our logo, or in a way that suggests endorsement. The Agent SDK branding guide does not permit "Claude Code" as a label inside products built on the SDK; the agent picker currently says "Claude Code".
+- Ways forward (owner decision): (a) ask Anthropic for written approval (contact sales, link on the legal page) before a public release; (b) release and state clearly that Claude subscription use is at the user's own risk and recommend an API key; (c) replace the Agent SDK adapter with a driver for the unmodified `claude` CLI in headless stream-json mode, which is closer to "ordinary use of Claude Code" (large change, still not confirmed by Anthropic).
+
+### Release setup (2026-11-12)
+
+- Decision (owner): keep Claude and follow Anthropic's rules. Before a Claude session starts, FocusIDE runs the user's own `claude auth status --json` and reads only the method and provider. A Claude plan login (or no login) does not start; the app explains how to set `ANTHROPIC_API_KEY` or a cloud provider. API key and Bedrock/Vertex/Foundry start as normal. Checked on this machine: a Max login is blocked, the same with a test key is allowed. The agent is labelled "Claude" (Agent SDK branding guide).
+- Auto-update: `tauri-plugin-updater` with signed `latest.json` from GitHub Releases. It checks 15 s after start and every 6 hours, downloads in the background, and installs only when the user picks "Restart to update". Settings has "Check for updates" and an on/off switch. The signing key is outside the repo (`~/.tauri/focuside-updater.key` with its password file) and in the repo secrets.
+- Issues: issue forms (bug, feature) and "Report a bug" / "Request a feature" in Settings and the palette, with the version and OS filled in. A failed agent start has "Report this problem".
+- Release: pushing a `v*` tag runs CI, builds the Windows installer, signs the update and drafts a GitHub Release with `latest.json`.
+- Website: `site/` deployed to GitHub Pages (SEO, JSON-LD, llms.txt, llms-full.txt, markdown twin, AI crawler rules). Custom domain focuside.dev waits for DNS.
+
 ## 11. Open items
 
 1. Owner says go to create the public repo `yobotn/focuside` and push.
 2. Set up the focuside.app redirect.
 3. Trademark search for FocusIDE.
-4. Check Anthropic's policy for third-party apps that start Claude Code through the Agent SDK, before public release.
+4. ~~Check Anthropic's policy~~ done 2026-11-12, see section 10. Decide between ways (a), (b) and (c) before the public release.
 5. ~~Which agent comes second in v2~~: all known ACP agents are now selectable; check each one live once installed.
 6. Rename the local folder from `terminalScreen` to `focuside` (optional, before the first push).

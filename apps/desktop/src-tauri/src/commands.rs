@@ -189,7 +189,7 @@ pub async fn session_start(
     tauri::async_runtime::spawn(async move {
         if let Err(e) = s.start(resume, true).await {
             let msg = format!("{e:#}");
-            if msg != "signin" {
+            if msg != "signin" && msg != "claude_access" {
                 use tauri::Emitter;
                 let _ = s.app_handle().emit(
                     "session",

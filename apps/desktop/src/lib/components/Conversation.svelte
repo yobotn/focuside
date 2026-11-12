@@ -2,6 +2,7 @@
   import { tick } from "svelte";
   import { t } from "../i18n";
   import { app } from "../stores/app.svelte";
+  import { reportIssue } from "../updates.svelte";
   import type { Session } from "../stores/session.svelte";
   import ChangesCard from "./ChangesCard.svelte";
   import Markdown from "./Markdown.svelte";
@@ -131,6 +132,13 @@
       </div>
     {:else if session.status === "failed"}
       <p class="text-danger selectable">{t("session.failedStart", { agent: app.agentName(session.agent), error: session.error ?? "" })}</p>
+      <button
+        class="btn self-start"
+        onclick={() =>
+          reportIssue("bug", { version: app.env?.version, os: app.env?.os, details: `${app.agentName(session.agent)} did not start: ${session.error ?? ""}` })}
+      >
+        {t("help.reportThis")}
+      </button>
     {:else if session.status === "starting" && !session.entries.length}
       <p class="text-center text-fg-muted">{t("session.starting", { agent: app.agentName(session.agent) })}</p>
     {/if}

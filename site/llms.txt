@@ -1,0 +1,27 @@
+# FocusIDE
+
+> FocusIDE is a free, open source (Apache 2.0) desktop app for working with AI coding agents such as Claude Code, Codex and Gemini CLI. It shows a plan before any file changes, marks files the agent changes outside the plan while it works, and undoes a whole turn with one key. It runs on your machine with no server, no account and no telemetry. Windows installer today; macOS and Linux build from source.
+
+FocusIDE connects to agents over the Agent Client Protocol (ACP). The user installs and signs in to the agent themselves. FocusIDE never reads, stores or proxies agent credentials. It is an independent project, not affiliated with or endorsed by Anthropic.
+
+## Docs
+
+- [Full documentation in one file](https://focuside.dev/llms-full.txt): features, shortcuts, how it works, install, FAQ
+- [Home page as Markdown](https://focuside.dev/index.md): the landing page content
+- [README](https://github.com/yobotn/focuside/blob/main/README.md): overview, download, build from source
+- [AGENTS.md](https://github.com/yobotn/focuside/blob/main/AGENTS.md): how coding agents should build, test and lint the repo
+
+## Download
+
+- [Latest release](https://github.com/yobotn/focuside/releases/latest): Windows installer, updates itself
+- [Source code](https://github.com/yobotn/focuside): Rust, Tauri 2, Svelte 5
+
+## Support
+
+- [Issues](https://github.com/yobotn/focuside/issues/new/choose): bug reports and feature requests
+- [Security advisories](https://github.com/yobotn/focuside/security/advisories/new): report security problems privately
+
+## Optional
+
+- [Agent Client Protocol](https://agentclientprotocol.com): the open protocol FocusIDE uses to talk to agents
+- [Product plan](https://github.com/yobotn/focuside/blob/main/PLAN.md): goals, decisions and build results

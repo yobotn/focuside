@@ -3,6 +3,15 @@
   import { t } from "../i18n";
   import { keyLabel } from "../platform";
   import { app } from "../stores/app.svelte";
+  import { updates } from "../updates.svelte";
+
+  function restart() {
+    if (app.projects.some((pr) => pr.sessions.some((x) => x.running))) {
+      app.flash(t("update.busy"), "error");
+      return;
+    }
+    updates.installAndRestart();
+  }
 
   const p = $derived(app.active);
   const s = $derived(app.session);
@@ -85,6 +94,13 @@
         <span class="item" class:text-warn={context >= 80}>{t("bar.context", { percent: context })}</span>
       {/if}
     {/if}
+    {#if updates.state.kind === "ready"}
+      <button class="update" onclick={restart} title={t("update.readyHint", { version: updates.state.version })}>
+        {t("update.ready", { version: updates.state.version })}
+      </button>
+    {:else if updates.state.kind === "installing"}
+      <span class="item">{t("update.installing", { version: updates.state.version })}</span>
+    {/if}
     {#if app.queue.length}
       <button class="waiting" onclick={() => (app.overlay = "queue")}>
         <span class="dot pulse-warn"></span>
@@ -96,6 +112,21 @@
 {/if}
 
 <style>
+  .update {
+    flex-shrink: 0;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 12px;
+    border: 1px solid var(--accent);
+    background: var(--accent-soft);
+    color: var(--fg);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .update:hover {
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
   .bar {
     display: flex;
     align-items: center;

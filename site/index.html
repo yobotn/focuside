@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FocusIDE: the simplest IDE for working with AI coding agents</title>
+<meta name="description" content="FocusIDE is a free, open source desktop app for AI coding agents like Claude Code, Codex and Gemini CLI. See a plan before any file changes, catch scope creep live, and undo a whole turn with one key.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://focuside.dev/">
+<link rel="alternate" hreflang="en" href="https://focuside.dev/">
+<link rel="alternate" hreflang="x-default" href="https://focuside.dev/">
+<link rel="alternate" type="text/markdown" href="/index.md" title="FocusIDE (Markdown)">
+<link rel="help" type="text/plain" href="/llms.txt" title="llms.txt">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/assets/icon-256.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark light">
+<meta name="author" content="yobotn">
+<meta name="application-name" content="FocusIDE">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="FocusIDE">
+<meta property="og:url" content="https://focuside.dev/">
+<meta property="og:title" content="FocusIDE: the simplest IDE for working with AI coding agents">
+<meta property="og:description" content="Plan first. Scope guard. Undo turn. A free, open source desktop app for Claude Code, Codex, Gemini CLI and any ACP agent.">
+<meta property="og:image" content="https://focuside.dev/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="FocusIDE logo next to a plan card with Review and Undo turn buttons.">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="FocusIDE: the simplest IDE for working with AI coding agents">
+<meta name="twitter:description" content="Plan first. Scope guard. Undo turn. Free and open source, for Claude Code, Codex, Gemini CLI and any ACP agent.">
+<meta name="twitter:image" content="https://focuside.dev/assets/og.png">
+<meta name="twitter:image:alt" content="FocusIDE logo next to a plan card with Review and Undo turn buttons.">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://focuside.dev/#website",
+      "url": "https://focuside.dev/",
+      "name": "FocusIDE",
+      "description": "The simplest IDE for working with AI coding agents.",
+      "inLanguage": "en",
+      "publisher": { "@id": "https://focuside.dev/#publisher" }
+    },
+    {
+      "@type": "Person",
+      "@id": "https://focuside.dev/#publisher",
+      "name": "yobotn",
+      "url": "https://github.com/yobotn"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://focuside.dev/#app",
+      "name": "FocusIDE",
+      "alternateName": "Focus IDE",
+      "description": "FocusIDE is a free, open source desktop app for AI coding agents. It shows a plan before any file changes, marks files changed outside the plan while the agent works, and undoes a whole turn with one key.",
+      "url": "https://focuside.dev/",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Integrated development environment",
+      "operatingSystem": "Windows 10, Windows 11",
+      "softwareVersion": "0.1.0",
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "isAccessibleForFree": true,
+      "downloadUrl": "https://github.com/yobotn/focuside/releases/latest",
+      "installUrl": "https://github.com/yobotn/focuside/releases/latest",
+      "codeRepository": "https://github.com/yobotn/focuside",
+      "screenshot": "https://focuside.dev/assets/screenshot.png",
+      "image": "https://focuside.dev/assets/og.png",
+      "softwareRequirements": "An ACP coding agent such as Claude Code, Codex or Gemini CLI, installed and set up by the user (Claude Code with an API key or a cloud provider). Git.",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "author": { "@id": "https://focuside.dev/#publisher" },
+      "publisher": { "@id": "https://focuside.dev/#publisher" },
+      "featureList": [
+        "Plan card before any file changes: at most 6 steps, every file, one line of risk",
+        "Scope guard: files changed outside the plan show live in amber with Pause",
+        "Undo turn: restore the project byte for byte to how it was before the turn",
+        "Works with Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose and any ACP agent",
+        "Waiting queue across projects",
+        "Diff viewer, file tree, fuzzy file picker, project search, terminal",
+        "Markdown files render as documents",
+        "No server, no account, no telemetry"
+      ]
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://focuside.dev/#howto",
+      "name": "Get started with FocusIDE",
+      "description": "Install FocusIDE and run your first planned change with an AI coding agent.",
+      "totalTime": "PT5M",
+      "tool": [{ "@type": "HowToTool", "name": "An ACP coding agent, for example Claude Code" }, { "@type": "HowToTool", "name": "Git" }],
+      "step": [
+        { "@type": "HowToStep", "position": 1, "name": "Install your agent", "text": "Install the agent you want to use. For Claude Code: npm install -g @anthropic-ai/claude-code, then set ANTHROPIC_API_KEY from the Claude Console, or set up Amazon Bedrock, Google Vertex AI or Microsoft Foundry." },
+        { "@type": "HowToStep", "position": 2, "name": "Install FocusIDE", "text": "Download the Windows installer from the latest GitHub release and run it.", "url": "https://github.com/yobotn/focuside/releases/latest" },
+        { "@type": "HowToStep", "position": 3, "name": "Open a folder", "text": "Open your project folder. Any folder works, git repo or not." },
+        { "@type": "HowToStep", "position": 4, "name": "Ask for a change", "text": "Type what you want with Plan first on. The agent answers with a plan card that lists its steps and every file it will touch." },
+        { "@type": "HowToStep", "position": 5, "name": "Run, check, keep or undo", "text": "Press Ctrl+Enter to run the plan. Watch the scope guard while it works, review the changes card, and press U to undo the whole turn if you do not want it." }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://focuside.dev/#faq",
+      "mainEntity": [
+        { "@type": "Question", "name": "What is FocusIDE?", "acceptedAnswer": { "@type": "Answer", "text": "FocusIDE is a free, open source desktop app for working with AI coding agents. The conversation with the agent is the center of the window. It shows a plan before any file changes, marks files the agent changes outside the plan, and can undo a whole turn with one key." } },
+        { "@type": "Question", "name": "Is FocusIDE free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. FocusIDE is free and open source under the Apache 2.0 license. You pay only for your agent, under your own plan with its provider." } },
+        { "@type": "Question", "name": "Which AI agents does FocusIDE work with?", "acceptedAnswer": { "@type": "Answer", "text": "Claude Code works with an API key or a cloud provider. Codex, Gemini CLI, OpenCode, Qwen Code and Goose work when installed. Any other agent that speaks the Agent Client Protocol (ACP) works through a custom command." } },
+        { "@type": "Question", "name": "Does FocusIDE see my code or my credentials?", "acceptedAnswer": { "@type": "Answer", "text": "No. FocusIDE has no server, no account and no telemetry. It runs on your machine and starts the agent you installed. It never reads, stores or proxies agent credentials. The agent talks to its own provider exactly as it does in your terminal." } },
+        { "@type": "Question", "name": "Does my project need to be a git repo?", "acceptedAnswer": { "@type": "Answer", "text": "No. Undo turn keeps snapshots in a separate private git repo inside the app's data folder. Your own repo, branches and history are never touched." } },
+        { "@type": "Question", "name": "How does Undo turn work?", "acceptedAnswer": { "@type": "Answer", "text": "Before each turn, FocusIDE takes a snapshot of the project. Undo turn restores every file the agent changed to its exact bytes from that snapshot and removes files the agent created. Files you saved yourself during the turn are kept by default." } },
+        { "@type": "Question", "name": "Which operating systems does FocusIDE support?", "acceptedAnswer": { "@type": "Answer", "text": "Windows 10 and 11 have an installer that updates itself. macOS and Linux build from source today and get installers later." } },
+        { "@type": "Question", "name": "Is FocusIDE made by Anthropic?", "acceptedAnswer": { "@type": "Answer", "text": "No. FocusIDE is an independent project. It is not affiliated with or endorsed by Anthropic. It works with Claude Code, which you install yourself." } }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="FocusIDE home">
+      <img src="/assets/icon.svg" width="28" height="28" alt="">
+      <span>FocusIDE</span>
+    </a>
+    <nav aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#agents">Agents</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/yobotn/focuside">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero wrap">
+    <p class="eyebrow">Free and open source. Windows today.</p>
+    <h1>The simplest IDE for working with AI agents.</h1>
+    <p class="lede">You read, approve and check. The agent types. FocusIDE shows a short plan before any file changes, marks scope creep while it happens, and undoes a whole turn with one key.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/yobotn/focuside/releases/latest">Download for Windows</a>
+      <a class="btn" href="https://github.com/yobotn/focuside">View on GitHub</a>
+    </div>
+    <p class="fine">Works with Claude Code, Codex, Gemini CLI and any ACP agent. No account. No telemetry.</p>
+    <figure class="shot">
+      <img src="/assets/screenshot.png" width="1920" height="1009" alt="FocusIDE after a turn. The plan card says 5 steps, 2 files. CHANGELOG.md is marked Not in plan in amber. Review and Undo turn buttons sit under the file list." fetchpriority="high">
+    </figure>
+  </section>
+
+  <section class="wrap facts" aria-label="Key facts">
+    <dl>
+      <div><dt>What</dt><dd>A desktop app for AI coding agents</dd></div>
+      <div><dt>Price</dt><dd>Free, Apache 2.0</dd></div>
+      <div><dt>Runs</dt><dd>On your machine, no server</dd></div>
+      <div><dt>Agents</dt><dd>Claude Code, Codex, Gemini CLI and more</dd></div>
+    </dl>
+  </section>
+
+  <section class="wrap" id="how">
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li>
+        <h3>Ask</h3>
+        <p>Type what you want. With Plan first on, the agent answers with a plan card: at most 6 steps, every file it will create, edit or delete, and one line of risk.</p>
+      </li>
+      <li>
+        <h3>Run</h3>
+        <p>Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd>. Edits inside the plan go through without asking. Files tick off as the agent works. A file outside the plan shows up in amber, with Pause.</p>
+      </li>
+      <li>
+        <h3>Keep or undo</h3>
+        <p>The changes card lists every file with line counts. Review the diff, revert one file, or press <kbd>U</kbd> to put the whole project back, byte for byte.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="wrap" id="features">
+    <h2>Built for people who run agents every day</h2>
+    <div class="grid">
+      <article><h3>Plan first</h3><p>See the steps and the file list before anything changes. Run it, change it, or throw it away.</p></article>
+      <article><h3>Scope guard</h3><p>Every file the agent touches is checked against the plan, live. You see scope creep when it happens, not after.</p></article>
+      <article><h3>Undo turn</h3><p>A snapshot before every turn. One key restores the project exactly. Works in any folder and never touches your git history.</p></article>
+      <article><h3>Waiting queue</h3><p>Several projects, several sessions. <kbd>Ctrl</kbd>+<kbd>J</kbd> jumps to the next one that needs an answer from you.</p></article>
+      <article><h3>Check the work</h3><p>Diff viewer, file tree, fuzzy file picker, project search, terminal drawer. Markdown files render as documents.</p></article>
+      <article><h3>Stays out of the way</h3><p>One window. Resizable panels on either side. Light and dark. Keyboard first, with full mouse support.</p></article>
+    </div>
+  </section>
+
+  <section class="wrap" id="agents">
+    <h2>Bring your own agent</h2>
+    <p>FocusIDE starts the agent you already use, over the open <a href="https://agentclientprotocol.com">Agent Client Protocol</a>. You install and set up the agent yourself. Usage is billed by its provider, to your own account. For Claude, FocusIDE needs an API key or a cloud provider: Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans. Claude Code reads the key; FocusIDE never sees it.</p>
+    <ul class="agents">
+      <li>Claude Code</li>
+      <li>Codex</li>
+      <li>Gemini CLI</li>
+      <li>OpenCode</li>
+      <li>Qwen Code</li>
+      <li>Goose</li>
+      <li>Any ACP agent</li>
+    </ul>
+  </section>
+
+  <section class="wrap privacy" id="privacy">
+    <h2>Your code stays on your machine</h2>
+    <ul class="checks">
+      <li>No server, no account, no telemetry.</li>
+      <li>FocusIDE never reads, stores or proxies agent credentials.</li>
+      <li>Snapshots live in a private repo in the app's data folder.</li>
+      <li>Open source, so you can check all of this.</li>
+    </ul>
+  </section>
+
+  <section class="wrap" id="faq">
+    <h2>Questions</h2>
+    <details><summary>What is FocusIDE?</summary><p>FocusIDE is a free, open source desktop app for working with AI coding agents. The conversation with the agent is the center of the window. It shows a plan before any file changes, marks files the agent changes outside the plan, and can undo a whole turn with one key.</p></details>
+    <details><summary>Is FocusIDE free?</summary><p>Yes. FocusIDE is free and open source under the Apache 2.0 license. You pay only for your agent, under your own plan with its provider.</p></details>
+    <details><summary>Which AI agents does FocusIDE work with?</summary><p>Claude Code works with an API key or a cloud provider. Codex, Gemini CLI, OpenCode, Qwen Code and Goose work when installed. Any other agent that speaks the Agent Client Protocol (ACP) works through a custom command.</p></details>
+    <details><summary>Does FocusIDE see my code or my credentials?</summary><p>No. FocusIDE has no server, no account and no telemetry. It runs on your machine and starts the agent you installed. It never reads, stores or proxies agent credentials. The agent talks to its own provider exactly as it does in your terminal.</p></details>
+    <details><summary>Does my project need to be a git repo?</summary><p>No. Undo turn keeps snapshots in a separate private git repo inside the app's data folder. Your own repo, branches and history are never touched.</p></details>
+    <details><summary>How does Undo turn work?</summary><p>Before each turn, FocusIDE takes a snapshot of the project. Undo turn restores every file the agent changed to its exact bytes from that snapshot and removes files the agent created. Files you saved yourself during the turn are kept by default.</p></details>
+    <details><summary>Which operating systems does FocusIDE support?</summary><p>Windows 10 and 11 have an installer that updates itself. macOS and Linux build from source today and get installers later.</p></details>
+    <details><summary>Is FocusIDE made by Anthropic?</summary><p>No. FocusIDE is an independent project. It is not affiliated with or endorsed by Anthropic. It works with Claude Code, which you install yourself.</p></details>
+  </section>
+
+  <section class="wrap start" id="start">
+    <h2>Get started in five minutes</h2>
+    <ol>
+      <li>Install your agent. For Claude Code: <code>npm install -g @anthropic-ai/claude-code</code>, then set <code>ANTHROPIC_API_KEY</code> from the Claude Console (or use a cloud provider).</li>
+      <li><a href="https://github.com/yobotn/focuside/releases/latest">Download FocusIDE</a> and run the installer.</li>
+      <li>Open a folder, ask for a change, and press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> on the plan.</li>
+    </ol>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/yobotn/focuside/releases/latest">Download for Windows</a>
+      <a class="btn" href="https://github.com/yobotn/focuside/issues/new/choose">Report a bug</a>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p><a href="https://github.com/yobotn/focuside">GitHub</a> · <a href="https://github.com/yobotn/focuside/releases">Releases</a> · <a href="https://github.com/yobotn/focuside/issues">Issues</a> · <a href="/llms.txt">llms.txt</a> · <a href="/index.md">Markdown</a></p>
+    <p>FocusIDE is free software under the Apache 2.0 license.</p>
+    <p class="tm">FocusIDE is an independent project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic. Other agent names are trademarks of their owners.</p>
+  </div>
+</footer>
+</body>
+</html>

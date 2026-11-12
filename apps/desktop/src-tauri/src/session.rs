@@ -133,6 +133,19 @@ impl Session {
             return Ok(());
         }
         self.emit("starting", json!({}));
+        // Claude only with an API key or a cloud provider (Anthropic's rule for Agent SDK apps).
+        if let Some(claude) = &self.cmd.claude {
+            match agent::claude_auth(claude, &self.cmd.env).await {
+                Ok(auth) => match auth.access() {
+                    agent::ClaudeAccess::Allowed => {}
+                    access => {
+                        self.emit("claude_access", json!({ "access": access }));
+                        bail!("claude_access");
+                    }
+                },
+                Err(e) => tracing::warn!("claude auth status: {e:#}"),
+            }
+        }
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let mut p = AgentProcess::spawn(&self.cmd, &self.project.root, None)?;
         let init = match p.conn.request("initialize", acp::initialize_params()).await {

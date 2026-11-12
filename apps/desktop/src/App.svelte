@@ -20,6 +20,8 @@
   import Settings from "./lib/components/Settings.svelte";
   import TerminalDrawer from "./lib/components/TerminalDrawer.svelte";
   import Splitter from "./lib/components/Splitter.svelte";
+  import ClaudeAccess from "./lib/components/ClaudeAccess.svelte";
+  import { reportIssue, updates } from "./lib/updates.svelte";
   import { defaultLayout, type Side } from "./lib/stores/app.svelte";
 
   let conversation: Conversation | undefined = $state();
@@ -119,6 +121,16 @@
       { id: "moveFiles", label: t("cmd.moveFiles"), run: () => app.movePanel("files") },
       { id: "moveViewer", label: t("cmd.moveViewer"), run: () => app.movePanel("viewer") },
       { id: "resetLayout", label: t("cmd.resetLayout"), run: () => app.resetLayout() },
+      {
+        id: "update",
+        label: t("update.check"),
+        run: () => {
+          app.overlay = "settings";
+          updates.check(true);
+        },
+      },
+      { id: "bug", label: t("help.reportBug"), run: () => reportIssue("bug", { version: app.env?.version, os: app.env?.os }) },
+      { id: "feature", label: t("help.requestFeature"), run: () => reportIssue("feature") },
       { id: "settings", label: t("cmd.settings"), run: () => (app.overlay = "settings") },
       {
         id: "theme",
@@ -249,8 +261,10 @@
     <main class="center">
       <IdentityBar />
       {#if session}
-        {#if (app.env && (!app.env.claude || !app.env.git || !app.env.adapter)) || session.status === "signin"}
-          <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner signin={session.status === "signin"} /></div>
+        {#if session.status === "claudeAccess"}
+          <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><ClaudeAccess {session} /></div>
+        {:else if app.env && (!app.env.claude || !app.env.git || !app.env.adapter)}
+          <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
         {/if}
         <Conversation bind:this={conversation} {session} />
         <MessageBox bind:this={messageBox} {session} onfocuscard={() => conversation?.focusLastCard()} />

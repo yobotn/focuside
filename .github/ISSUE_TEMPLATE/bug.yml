@@ -1,0 +1,54 @@
+name: Bug report
+description: Something does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the report. In FocusIDE, Settings > Report a bug fills in the version and OS for you.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a project
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: FocusIDE version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "windows 11"
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      options:
+        - Claude Code
+        - Codex
+        - Gemini CLI
+        - OpenCode
+        - Qwen Code
+        - Goose
+        - Custom command
+        - Not related to an agent
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error text or logs
+      description: Remove anything private before you post.
+      render: text

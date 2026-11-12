@@ -12,7 +12,7 @@ import type {
   Waiting,
 } from "../types";
 
-export type Status = "idle" | "starting" | "ready" | "stopped" | "failed" | "signin";
+export type Status = "idle" | "starting" | "ready" | "stopped" | "failed" | "signin" | "claudeAccess";
 
 let seq = 0;
 const nid = () => `e${++seq}`;
@@ -74,6 +74,8 @@ export class Session {
   agent = "claude";
   /** The agent has a plan mode, so "Plan first" can work. */
   planMode = $state(true);
+  /** Why Claude did not start: a subscription login, or not signed in at all. */
+  access = $state<"subscription" | "signedOut" | null>(null);
   name = $state("");
   renamed = $state(false);
   status = $state<Status>("idle");
@@ -221,7 +223,13 @@ export class Session {
         this.error = e.message;
         return "none";
       case "signin":
-        this.status = "signin";
+        // Signing in to a Claude account is not offered (see agent::ClaudeAccess): ask for a key.
+        this.status = "claudeAccess";
+        this.access = "signedOut";
+        return "none";
+      case "claude_access":
+        this.status = "claudeAccess";
+        this.access = e.access;
         return "none";
       case "stopped":
         this.status = "stopped";

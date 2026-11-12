@@ -1,0 +1,67 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the Windows installer, sign the update files and create a
+# draft GitHub Release with latest.json for the in-app updater. Publish the draft by hand
+# after a check; the updater only sees published releases.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install UI dependencies
+        run: npm --prefix apps/desktop ci
+
+      - name: File icons
+        run: node scripts/build-icons.mjs
+
+      - name: Agent adapter
+        run: node scripts/fetch-adapter.mjs
+
+      - name: Build, sign updates and draft the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npx tauri
+          args: --config src-tauri/tauri.bundle.conf.json --config src-tauri/tauri.release.conf.json
+          tagName: ${{ github.ref_name }}
+          releaseName: FocusIDE ${{ github.ref_name }}
+          releaseBody: |
+            Windows installer: download `FocusIDE_*_x64-setup.exe` below.
+
+            The installer is not code-signed yet, so Windows SmartScreen may warn. Choose "More info", then "Run anyway".
+
+            FocusIDE starts the coding agent you installed yourself (Claude Code, Codex, Gemini CLI and other ACP agents). It never reads, stores or proxies your credentials.
+
+            Claude needs an API key (`ANTHROPIC_API_KEY`) or a cloud provider. Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans, so FocusIDE does not start Claude with a Pro, Max, Team or Enterprise login.
+
+            Found a problem? [Open an issue](https://github.com/yobotn/focuside/issues/new/choose).
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true

@@ -9,6 +9,7 @@ import { t } from "../i18n";
 import type { Entry, ProjectInfo, UndoOutcome, Waiting } from "../types";
 import { Session, type SavedSession } from "./session.svelte";
 import { applyTheme, type Theme } from "../theme.svelte";
+import { updates } from "../updates.svelte";
 
 export interface Settings {
   theme: Theme;
@@ -17,6 +18,8 @@ export interface Settings {
   agent: string;
   /** The command line for the "custom" agent. */
   agentCommand: string;
+  /** Check GitHub Releases for updates in the background. */
+  autoUpdate: boolean;
   showIgnored: boolean;
   notifications: boolean;
 }
@@ -53,7 +56,7 @@ const defaults: Persisted = {
   sessions: {},
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", showIgnored: false, notifications: true },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true },
   filesVisible: true,
   layout: { ...defaultLayout },
 };
@@ -161,6 +164,7 @@ class AppStore {
       this.flash(errText(e), "error");
     }
     this.ready = true;
+    updates.start(this.settings.autoUpdate);
   }
 
   /** Moves a panel to the other side of the conversation. */
@@ -282,7 +286,7 @@ class AppStore {
 
   agentName(id: string): string {
     if (id === "custom") return t("agent.custom");
-    if (id === "claude") return "Claude Code";
+    if (id === "claude") return "Claude";
     return this.agents.find((a) => a.id === id)?.name ?? id;
   }
 
@@ -437,7 +441,7 @@ class AppStore {
   private promptError(s: Session, msg: string) {
     if (msg === "otherRunning") s.note(t("session.otherRunning"), "warn");
     else if (msg === "busy") s.note(t("conv.working"), "muted");
-    else if (msg === "signin") s.status = "signin";
+    else if (msg === "signin" || msg === "claude_access") s.status = "claudeAccess";
     else s.note(t("conv.error", { error: msg }), "error");
   }
 
@@ -524,10 +528,15 @@ class AppStore {
 
   async resumeAgent(s: Session) {
     try {
+      s.status = "starting";
       await api.sessionResume(s.key);
     } catch (e) {
-      s.status = "failed";
-      s.error = errText(e);
+      const msg = errText(e);
+      if (msg === "claude_access" || msg === "signin") s.status = "claudeAccess";
+      else {
+        s.status = "failed";
+        s.error = msg;
+      }
     }
   }
 

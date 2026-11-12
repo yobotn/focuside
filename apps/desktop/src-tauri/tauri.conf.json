@@ -39,5 +39,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY3NTNDNUNBQzgyOUUxN0UKUldSKzRTbkl5c1ZUOStiRm5KSDR2cDJsUWJ0TWtJNlBVaHpJZk1Lc044VEpkak1KZSt0U2xMekkK",
+      "endpoints": [
+        "https://github.com/yobotn/focuside/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

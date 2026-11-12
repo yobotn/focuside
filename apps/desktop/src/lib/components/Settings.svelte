@@ -3,6 +3,19 @@
   import { t } from "../i18n";
   import { app } from "../stores/app.svelte";
   import { applyTheme, type Theme } from "../theme.svelte";
+  import { reportIssue, updates } from "../updates.svelte";
+
+  const info = $derived({ version: app.env?.version, os: app.env?.os });
+  const status = $derived.by(() => {
+    const st = updates.state;
+    if (st.kind === "checking") return t("update.checking");
+    if (st.kind === "none") return t("update.none");
+    if (st.kind === "downloading") return t("update.available", { version: st.version });
+    if (st.kind === "ready") return t("update.readyHint", { version: st.version });
+    if (st.kind === "installing") return t("update.installing", { version: st.version });
+    if (st.kind === "error") return t("update.failed", { error: st.message });
+    return "";
+  });
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -112,7 +125,40 @@
           app.save();
         }}
       />
+
+      <label for="s-update">{t("update.auto")}</label>
+      <input
+        id="s-update"
+        type="checkbox"
+        checked={app.settings.autoUpdate}
+        onchange={(e) => {
+          app.settings.autoUpdate = e.currentTarget.checked;
+          if (e.currentTarget.checked) updates.start(true);
+          else updates.stop();
+          app.save();
+        }}
+      />
     </div>
+
+    <div class="about">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-fg-muted">{t("help.version", { version: app.env?.version ?? "" })}</span>
+        <span class="flex-1"></span>
+        {#if updates.state.kind === "ready"}
+          <button class="btn" onclick={() => updates.installAndRestart()}>{t("update.ready", { version: updates.state.version })}</button>
+        {:else}
+          <button class="btn" onclick={() => updates.check(true)} disabled={updates.state.kind === "checking" || updates.state.kind === "downloading"}>
+            {t("update.check")}
+          </button>
+        {/if}
+      </div>
+      {#if status}<p class="mt-2 text-fg-muted selectable" role="status">{status}</p>{/if}
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button class="btn" onclick={() => reportIssue("bug", info)}>{t("help.reportBug")}</button>
+        <button class="btn" onclick={() => reportIssue("feature")}>{t("help.requestFeature")}</button>
+      </div>
+    </div>
+
     <div class="mt-5 flex justify-end">
       <button class="btn" onclick={onclose}>{t("common.close")}</button>
     </div>
@@ -120,6 +166,11 @@
 </div>
 
 <style>
+  .about {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
   .backdrop {
     position: fixed;
     inset: 0;
