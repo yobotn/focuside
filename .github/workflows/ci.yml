@@ -63,6 +63,9 @@ jobs:
       - name: Strings
         run: node scripts/i18n-check.mjs
 
+      - name: Bundle check
+        run: node scripts/check-bundle.mjs
+
       - name: Rust format
         run: cargo fmt --all --check
 

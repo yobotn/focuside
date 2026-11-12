@@ -14,7 +14,7 @@
 
 FocusIDE is an IDE where the conversation with the coding agent is the center of the window. The user reads, approves and checks. The agent types. Files, diffs and a terminal are there to check the work.
 
-FocusIDE does not include a model or an agent. The installer does include the claude-agent-acp adapter executable (Apache-2.0 source; it embeds Anthropic's Claude Agent SDK). It starts the agent the user already installed, and talks to it over the Agent Client Protocol (ACP, https://agentclientprotocol.com). Usage is billed by the agent's provider to the user's own account.
+FocusIDE does not include a model or an agent. The installer does not include the claude-agent-acp adapter either: FocusIDE downloads it from its GitHub release (agentclientprotocol/claude-agent-acp) the first time the user starts a Claude chat session, after the user agrees (Apache-2.0 source; it embeds Anthropic's Claude Agent SDK). It starts the agent the user already installed, and talks to it over the Agent Client Protocol (ACP, https://agentclientprotocol.com). Usage is billed by the agent's provider to the user's own account.
 
 **Chat mode with Claude needs an API key or a cloud provider.** FocusIDE's chat mode connects to Claude Code through an adapter built on the Claude Agent SDK, and Anthropic asks apps built on the SDK to use API key authentication. So chat mode starts Claude with an API key (`ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys)) or a cloud provider (Amazon Bedrock, Google Vertex AI, Microsoft Foundry). With a Claude plan (Pro, Max, Team, Enterprise), run Claude in the terminal: FocusIDE opens the terminal drawer, and the user types `claude` there. Claude Code then runs with its own login. A Claude pane in FocusIDE is planned for a later version. FocusIDE never reads or stores credentials. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
 
@@ -55,7 +55,7 @@ Several projects stay open in a rail on the left, each with several sessions. A 
 
 | Agent | How FocusIDE starts it |
 | --- | --- |
-| Claude Code | The bundled claude-agent-acp adapter with `--hide-claude-auth`, which runs the user's own installed `claude` binary |
+| Claude Code | The claude-agent-acp adapter with `--hide-claude-auth`, which runs the user's own installed `claude` binary. The adapter is downloaded from GitHub on first use |
 | Codex | `codex-acp` (`npm install -g @agentclientprotocol/codex-acp`) |
 | Gemini CLI | `gemini --acp` |
 | OpenCode | `opencode acp` |

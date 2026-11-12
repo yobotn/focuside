@@ -1,14 +1,14 @@
 # Third-party notices
 
-FocusIDE is licensed under the GNU General Public License v3.0 (see [LICENSE](LICENSE)). The installer also includes the program below, which has its own license. It runs as a separate process, and FocusIDE talks to it over standard input and output.
+FocusIDE is licensed under the GNU General Public License v3.0 (see [LICENSE](LICENSE)). FocusIDE works with the program below, which has its own license. The installer does not include it. FocusIDE downloads it from the upstream GitHub release the first time the user starts a Claude chat session, after the user agrees. It runs as a separate process, and FocusIDE talks to it over standard input and output.
 
 ## claude-agent-acp
 
-- What: the `claude-agent-acp` executable, version 0.106.0, bundled as a sidecar. FocusIDE starts it for Claude chat mode.
+- What: the `claude-agent-acp` executable, version 0.106.0. FocusIDE starts it for Claude chat mode. FocusIDE does not redistribute it: the app downloads the release archive for the user's system from https://github.com/agentclientprotocol/claude-agent-acp/releases/tag/v0.106.0, checks a pinned SHA-256, and stores the executable in the app data folder (`adapters/claude-agent-acp-0.106.0`).
 - Source: https://github.com/agentclientprotocol/claude-agent-acp (tag `v0.106.0`)
 - Source license: Apache License 2.0. Copyright 2025 Zed Industries, Inc. and contributors. The full text is below.
 - Claude Agent SDK: the executable is built with `bun build --compile` and embeds Anthropic's Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`). The SDK is not open source. Its license reads: "(c) Anthropic PBC. All rights reserved. Use is subject to Anthropic's Commercial Terms of Service." See https://www.anthropic.com/legal/commercial-terms and https://code.claude.com/docs/en/agent-sdk/overview.
-- Not included: the Claude CLI (`claude`) that comes in the upstream release archive. FocusIDE deletes it before bundling (`scripts/fetch-adapter.mjs`) and runs the user's own installed `claude` instead.
+- Not used: the Claude CLI (`claude`) that comes in the upstream release archive. FocusIDE does not extract it (`crates/core/src/adapter_download.rs`; the dev script `scripts/fetch-adapter.mjs` deletes it) and runs the user's own installed `claude` instead.
 
 ### Apache License 2.0 (claude-agent-acp)
 

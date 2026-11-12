@@ -238,7 +238,7 @@
     <div class="flex-1"></div>
   {:else if !project}
     <div class="flex flex-1 flex-col">
-      {#if app.env && (!app.env.claude || !app.env.git || !app.env.adapter)}
+      {#if app.envProblem}
         <div class="mx-auto mt-6 w-[560px] max-w-[90vw]"><EnvBanner /></div>
       {/if}
       <div class="flex-1">
@@ -263,12 +263,15 @@
       {#if session}
         {#if session.status === "claudeAccess"}
           <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><ClaudeAccess {session} /></div>
-        {:else if app.env && (!app.env.claude || !app.env.git || !app.env.adapter)}
+        {:else if app.envProblem}
           <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
         {/if}
         <Conversation bind:this={conversation} {session} />
         <MessageBox bind:this={messageBox} {session} onfocuscard={() => conversation?.focusLastCard()} />
       {:else}
+        {#if app.envProblem}
+          <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
+        {/if}
         <div class="flex-1"></div>
       {/if}
       {#if app.terminalVisible}

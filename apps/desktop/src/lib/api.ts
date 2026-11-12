@@ -14,6 +14,8 @@ export interface EnvCheck {
   claude: string | null;
   git: string | null;
   adapter: string | null;
+  /** The upstream release FocusIDE downloads when the adapter is missing. Null on a system without a build. */
+  adapterDownload: { repo: string; version: string; sizeMb: number } | null;
   os: string;
   version: string;
 }
@@ -28,6 +30,7 @@ export const api = {
   projectClose: (id: string) => invoke<void>("project_close", { id }),
 
   agentList: () => invoke<AgentInfo[]>("agent_list"),
+  adapterDownload: () => invoke<string>("adapter_download"),
   sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string) =>
     invoke<string>("session_start", { projectId, resume, agentId, customCommand }),
   sessionPrompt: (key: string, blocks: unknown[], planFirst: boolean, continueTurn: string | null = null) =>
@@ -63,6 +66,10 @@ export function onSessionEvent(cb: (e: SessionEvent) => void): Promise<UnlistenF
 
 export function onOpenPaths(cb: (paths: string[]) => void): Promise<UnlistenFn> {
   return listen<string[]>("open-paths", (e) => cb(e.payload));
+}
+
+export function onAdapterDownload(cb: (p: { received: number; total: number }) => void): Promise<UnlistenFn> {
+  return listen<{ received: number; total: number }>("adapter-download", (e) => cb(e.payload));
 }
 
 /** Error text from a rejected command. */

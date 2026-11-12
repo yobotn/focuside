@@ -42,13 +42,20 @@ pub fn debug_log(message: String) {
     eprintln!("[ui] {message}");
 }
 
-/// What is installed: Claude Code, git and the bundled ACP adapter.
+/// What is installed: Claude Code, git and the claude-agent-acp adapter. `adapterDownload` names
+/// the release FocusIDE would download when the adapter is missing.
 #[tauri::command]
 pub fn env_check(state: State<'_, AppState>) -> Value {
+    use focuside_core::adapter_download as dl;
     json!({
         "claude": agent::locate_claude(),
         "git": state.git,
         "adapter": agent::locate_adapter(),
+        "adapterDownload": dl::current().map(|a| json!({
+            "repo": dl::REPO,
+            "version": dl::VERSION,
+            "sizeMb": a.size.div_ceil(1_000_000),
+        })),
         "os": std::env::consts::OS,
         "version": env!("CARGO_PKG_VERSION"),
     })
@@ -60,6 +67,30 @@ pub async fn agent_list() -> Vec<agent::AgentInfo> {
     tauri::async_runtime::spawn_blocking(agent::agents)
         .await
         .unwrap_or_default()
+}
+
+/// Downloads the pinned claude-agent-acp release from GitHub into app data, after the user
+/// agreed in the UI. Progress arrives as `adapter-download` events. Returns the adapter path.
+#[tauri::command]
+pub async fn adapter_download(app: AppHandle, state: State<'_, AppState>) -> Res<String> {
+    use tauri::Emitter;
+    let root = state.data_dir.clone();
+    let task = tauri::async_runtime::spawn(async move {
+        let mut last = u64::MAX;
+        focuside_core::adapter_download::download(&root, |received, total| {
+            let pct = received * 100 / total.max(1);
+            if pct != last {
+                last = pct;
+                let _ = app.emit(
+                    "adapter-download",
+                    json!({ "received": received, "total": total }),
+                );
+            }
+        })
+        .await
+    });
+    let path = task.await.map_err(err)?.map_err(|e| format!("{e:#}"))?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]

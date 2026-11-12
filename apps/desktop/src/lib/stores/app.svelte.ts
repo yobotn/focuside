@@ -4,7 +4,7 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { api, errText, onOpenPaths, onSessionEvent, type AgentInfo, type EnvCheck, type SessionEvent } from "../api";
+import { api, errText, onAdapterDownload, onOpenPaths, onSessionEvent, type AgentInfo, type EnvCheck, type SessionEvent } from "../api";
 import { t } from "../i18n";
 import type { Entry, ProjectInfo, UndoOutcome, Waiting } from "../types";
 import { Session, type SavedSession } from "./session.svelte";
@@ -71,6 +71,11 @@ export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "se
 class AppStore {
   ready = $state(false);
   env = $state<EnvCheck | null>(null);
+  /** The claude-agent-acp download: null when idle, else the percent done. */
+  adapterProgress = $state<number | null>(null);
+  adapterError = $state<string | null>(null);
+  /** A Claude session that could not start because the adapter was missing. It starts after the download. */
+  private adapterWaiting = $state<{ resume?: SavedSession; agentId?: string } | null>(null);
   projects = $state<Project[]>([]);
   activeId = $state<string | null>(null);
   overlay = $state<Overlay>(null);
@@ -284,6 +289,38 @@ class AppStore {
     this.agents = await api.agentList().catch(() => []);
   }
 
+  /** The adapter is missing and a Claude session needs it. */
+  get needsAdapter(): boolean {
+    return !!this.env && !this.env.adapter && (this.settings.agent === "claude" || !!this.adapterWaiting);
+  }
+
+  /** Something the user has to install or download before a session can start. */
+  get envProblem(): boolean {
+    return !!this.env && (!this.env.claude || !this.env.git || this.needsAdapter);
+  }
+
+  /** Downloads the pinned adapter after the user chose Download, then starts the waiting session. */
+  async downloadAdapter() {
+    if (this.adapterProgress !== null) return;
+    this.adapterProgress = 0;
+    this.adapterError = null;
+    const off = await onAdapterDownload(({ received, total }) => {
+      this.adapterProgress = Math.min(100, Math.floor((received * 100) / Math.max(total, 1)));
+    });
+    try {
+      await api.adapterDownload();
+      this.env = await api.envCheck();
+      const waiting = this.adapterWaiting;
+      this.adapterWaiting = null;
+      if (waiting && this.active) await this.newSession(waiting.resume, waiting.agentId);
+    } catch (e) {
+      this.adapterError = errText(e);
+    } finally {
+      off();
+      this.adapterProgress = null;
+    }
+  }
+
   agentName(id: string): string {
     if (id === "custom") return t("agent.custom");
     if (id === "claude") return "Claude";
@@ -322,7 +359,10 @@ class AppStore {
           id === "custom" ? t("agent.customMissing") : t("agent.missing", { name: this.agentName(id), install: info?.install ?? "" }),
           "error",
         );
-      } else if (msg.startsWith("missing:")) this.env = await api.envCheck();
+      } else if (msg.startsWith("missing:")) {
+        if (msg === "missing:adapter") this.adapterWaiting = { resume, agentId };
+        this.env = await api.envCheck();
+      }
       else this.flash(msg, "error");
     }
   }

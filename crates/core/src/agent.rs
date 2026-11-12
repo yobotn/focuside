@@ -1,4 +1,4 @@
-//! The agents FocusIDE starts over ACP: Claude Code through the bundled adapter, and other ACP
+//! The agents FocusIDE starts over ACP: Claude Code through the claude-agent-acp adapter, and other ACP
 //! agents the user installed. Also the session parameters, including the plan format instruction.
 
 use crate::acp::AgentCommand;
@@ -44,14 +44,18 @@ fn exe(name: &str) -> String {
     }
 }
 
-/// The adapter executable: FOCUSIDE_ACP_ADAPTER, then next to the app (installed sidecar),
-/// then the dev copy in apps/desktop/src-tauri/binaries found from the app's folder upward.
+/// The adapter executable: FOCUSIDE_ACP_ADAPTER, then the copy downloaded to app data
+/// (`adapter_download`), then next to the app (older installs that bundled it), then the dev
+/// copy in apps/desktop/src-tauri/binaries found from the app's folder upward.
 pub fn locate_adapter() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("FOCUSIDE_ACP_ADAPTER") {
         let p = PathBuf::from(p);
         if p.is_file() {
             return Some(p);
         }
+    }
+    if let Some(p) = crate::adapter_download::installed() {
+        return Some(p);
     }
     let sidecar = exe(&format!("{ADAPTER}-{}", env!("FOCUSIDE_TARGET")));
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();

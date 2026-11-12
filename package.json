@@ -10,7 +10,7 @@
     "icons": "node scripts/build-icons.mjs",
     "test": "cargo test --workspace",
     "spike": "cargo run -q -p focuside-spike --",
-    "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all --check && node scripts/text-lint.mjs && node scripts/i18n-check.mjs && npm --prefix apps/desktop run check",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all --check && node scripts/text-lint.mjs && node scripts/i18n-check.mjs && node scripts/check-bundle.mjs && npm --prefix apps/desktop run check",
     "lint:text": "node scripts/text-lint.mjs"
   }
 }

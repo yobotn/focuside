@@ -75,6 +75,8 @@ pub fn run() {
             let config_dir = app.path().app_config_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             std::fs::create_dir_all(&config_dir)?;
+            // The claude-agent-acp adapter is downloaded here on first use.
+            focuside_core::adapter_download::set_data_root(data_dir.clone());
             let argv: Vec<String> = std::env::args().collect();
             let cwd = std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
@@ -94,6 +96,7 @@ pub fn run() {
             commands::debug_log,
             commands::env_check,
             commands::agent_list,
+            commands::adapter_download,
             commands::startup_paths,
             commands::ui_state_load,
             commands::ui_state_save,

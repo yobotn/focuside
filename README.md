@@ -111,7 +111,7 @@ flowchart LR
 
 | Agent | How FocusIDE starts it | Notes |
 | :-- | :-- | :-- |
-| Claude Code | Bundled `claude-agent-acp` adapter with `--hide-claude-auth`, which runs your own `claude` | Chat mode: API key or cloud provider. Claude plan: run `claude` in the terminal. Full plan mode. |
+| Claude Code | `claude-agent-acp` adapter with `--hide-claude-auth`, which runs your own `claude`. FocusIDE downloads the adapter from its GitHub release the first time you start a Claude chat session, after you agree | Chat mode: API key or cloud provider. Claude plan: run `claude` in the terminal. Full plan mode. |
 | Codex | `codex-acp`, from `npm install -g @agentclientprotocol/codex-acp` | Install it yourself. |
 | Gemini CLI | `gemini --acp` | Install it yourself. |
 | OpenCode | `opencode acp` | Install it yourself. |
@@ -155,7 +155,7 @@ Needs Rust (stable), Node 22+ and git.
 
 ```sh
 npm run setup                    # UI dependencies
-node scripts/fetch-adapter.mjs   # pinned claude-agent-acp binary for this OS
+node scripts/fetch-adapter.mjs   # pinned claude-agent-acp binary for this OS (dev only)
 npm run dev                      # run the app in development
 npm run lint                     # clippy, rustfmt, text lint, strings, svelte-check
 npm test                         # Rust tests
@@ -205,4 +205,4 @@ Copyright (C) 2026 yobotn.
 
 FocusIDE is an independent project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic. Other agent names are trademarks of their owners.
 
-FocusIDE does not include Claude Code or any other agent. You install the agent yourself. The installer does include one third-party program: the `claude-agent-acp` adapter executable. Its source is Apache-2.0, and the executable embeds Anthropic's Claude Agent SDK, which is under Anthropic's Commercial Terms. The Claude CLI that comes with the adapter release is removed before bundling. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+FocusIDE does not include Claude Code or any other agent. You install the agent yourself. The installer also does not include the `claude-agent-acp` adapter. The first time you start a Claude chat session, FocusIDE asks, then downloads the pinned release from [agentclientprotocol/claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp) on GitHub, checks its SHA-256 and keeps only the adapter executable. Its source is Apache-2.0, and the executable embeds Anthropic's Claude Agent SDK, which is under Anthropic's Commercial Terms. The Claude CLI that comes with the adapter release is not kept. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

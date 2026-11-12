@@ -37,8 +37,13 @@ jobs:
       - name: File icons
         run: node scripts/build-icons.mjs
 
-      - name: Agent adapter
-        run: node scripts/fetch-adapter.mjs
+      # FocusIDE does not bundle claude-agent-acp: the app downloads it on first use. Remove
+      # copies a cached target folder may still hold from older builds, then check the config.
+      - name: Bundle check (config)
+        shell: bash
+        run: |
+          rm -f target/release/claude-agent-acp* target/release/claude target/release/claude.exe
+          node scripts/check-bundle.mjs
 
       - name: Build, sign updates and draft the release
         uses: tauri-apps/tauri-action@v0
@@ -59,9 +64,14 @@ jobs:
 
             FocusIDE starts the coding agent you installed yourself (Claude Code, Codex, Gemini CLI and other ACP agents). It never reads, stores or proxies your credentials.
 
+            Claude chat mode downloads the claude-agent-acp connector from its GitHub release (agentclientprotocol/claude-agent-acp) the first time you use it, after you agree.
+
             Claude needs an API key (`ANTHROPIC_API_KEY`) or a cloud provider. Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans, so FocusIDE does not start Claude with a Pro, Max, Team or Enterprise login.
 
             Found a problem? [Open an issue](https://github.com/yobotn/focuside/issues/new/choose).
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
+
+      - name: Bundle check (build output)
+        run: node scripts/check-bundle.mjs target/release
