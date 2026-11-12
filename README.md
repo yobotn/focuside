@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/desktop/app-icon.svg" width="96" height="96" alt="FocusIDE logo">
+  <img src="apps/desktop/app-icon.svg" width="104" height="104" alt="FocusIDE logo">
 </p>
 
 <h1 align="center">FocusIDE</h1>
@@ -10,93 +10,144 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yobotn/focuside/releases/latest"><img src="https://img.shields.io/github/v/release/yobotn/focuside?label=release&color=22c55e" alt="Latest release"></a>
-  <a href="https://github.com/yobotn/focuside/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/yobotn/focuside/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="https://github.com/yobotn/focuside/releases/latest"><img src="https://img.shields.io/github/v/release/yobotn/focuside?label=release&color=22c55e&logo=github" alt="Latest release"></a>
+  <a href="https://github.com/yobotn/focuside/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/yobotn/focuside/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
+  <a href="https://github.com/yobotn/focuside/releases"><img src="https://img.shields.io/github/downloads/yobotn/focuside/total?color=22c55e&label=downloads" alt="Downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache 2.0"></a>
-  <img src="https://img.shields.io/badge/platform-Windows-0078d4" alt="Platform: Windows">
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?logo=windows&logoColor=white" alt="Platform: Windows 10 and 11">
+  <img src="https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-24c8db?logo=tauri&logoColor=white" alt="Built with Tauri 2 and Rust">
 </p>
 
 <p align="center">
-  <a href="https://github.com/yobotn/focuside/releases/latest"><b>Download for Windows</b></a>
-  &nbsp;·&nbsp;
-  <a href="https://yobotn.github.io/focuside/">Website</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/yobotn/focuside/issues/new/choose">Report a bug</a>
+  <a href="https://github.com/yobotn/focuside/releases/latest"><b>⬇️ Download for Windows</b></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="https://yobotn.github.io/focuside/"><b>🌐 Website</b></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="https://github.com/yobotn/focuside/issues/new/choose"><b>🐛 Report a bug</b></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="https://github.com/yobotn/focuside/issues/new?template=feature.yml"><b>💡 Request a feature</b></a>
 </p>
 
 <p align="center">
   <img src="docs/screenshot.png" alt="FocusIDE showing a finished plan. One file the agent changed outside the plan is marked Not in plan, with Review and Undo turn buttons." width="900">
 </p>
 
-FocusIDE is a free, open source desktop app for people who use coding agents every day. It starts the agent you already have installed, such as Claude Code, Codex or Gemini CLI. It shows you a short plan before any file changes, watches what the agent touches, and lets you undo a whole turn with one key.
+> [!TIP]
+> FocusIDE is a **free, open source desktop app** for people who use coding agents every day. It starts the agent you already have, shows a short plan **before** any file changes, watches what the agent touches, and undoes a whole turn with **one key**.
+
+---
+
+## ✨ Why FocusIDE
+
+| | |
+| :-- | :-- |
+| 📋 **Plan first** | The agent shows a plan card before it edits anything: at most 6 steps, every file it will create, edit or delete, and one line of risk. Run it with <kbd>Ctrl</kbd>+<kbd>Enter</kbd>, change it, or throw it away. |
+| 🛡️ **Scope guard** | While the agent works, any file it touches outside the plan shows up live in amber, with a **Pause** button. You see scope creep when it happens, not after. |
+| ⏪ **Undo turn** | Every turn starts with a snapshot. One key puts the project back exactly as it was, byte for byte. Works in any folder, git repo or not, and never touches your git history. |
+| 🗂️ **One window, every project** | Projects live in a rail on the left. The waiting queue (<kbd>Ctrl</kbd>+<kbd>J</kbd>) jumps to the next session that needs you, across all projects. |
+| 🔌 **Bring your own agent** | Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose, or any command that speaks the [Agent Client Protocol](https://agentclientprotocol.com). |
+| 🔒 **Local and private** | No server, no account, no telemetry. FocusIDE never reads, stores or proxies your agent credentials. |
 
 It is not an editor with a chat box bolted on. The conversation is the center of the window. Files, diffs and the terminal are there when you need to check the work.
 
-## Why FocusIDE
+## 🧭 How a turn works
 
-- **Plan first.** The agent shows a plan card before it edits anything: at most 6 steps, every file it will create, edit or delete, and one line of risk. Run it with `Ctrl+Enter`, change it, or throw it away.
-- **Scope guard.** While the agent works, any file it touches that was not in the plan shows up live in amber, with a Pause button. You see scope creep when it happens, not after.
-- **Undo turn.** Every turn starts with a snapshot. One key puts the project back exactly as it was, byte for byte. It works in any folder, git repo or not, and never touches your own git history.
-- **One window, every project.** A rail on the left holds your projects. The waiting queue (`Ctrl+J`) jumps to the next session that needs an answer from you, across all projects.
-- **Any ACP agent.** Claude Code works out of the box with an API key. Codex, Gemini CLI, OpenCode, Qwen Code, Goose or any custom command that speaks the Agent Client Protocol work too.
+```mermaid
+flowchart LR
+    A["💬 You ask"] --> B["📋 Plan card<br/>steps, files, risk"]
+    B -->|"Ctrl+Enter"| C["🤖 Agent works<br/>edits inside the plan"]
+    C --> D{"Outside the plan?"}
+    D -->|yes| E["🛡️ Amber warning<br/>Pause"]
+    D -->|no| F["✅ Changes card<br/>diff per file"]
+    E --> F
+    F -->|"U"| G["⏪ Undo turn<br/>byte for byte"]
+    F -->|"R"| H["🔍 Review the diff"]
+```
 
-## Features
+## 🧰 Features
 
-- Plan card with steps, files and risk. Files tick off as the agent edits them.
-- Changes card after each turn, with line counts, a diff viewer and Undo turn.
-- Revert a single file from a turn. Redo the last undo.
-- Permission prompts inline in the conversation. Edits inside the plan run without asking.
-- Stop (`Ctrl+.`) cancels the turn and ends every process the agent started.
-- Sessions: several per project, named, saved and resumed with their history.
-- File tree with clear icons, a fast fuzzy file picker and project-wide search.
-- Viewer for code and diffs. Markdown files render as documents, with tables, task lists, alerts and images.
-- Terminal drawer in the project folder.
-- Command palette, model picker, `@` to mention files, `/` for agent commands.
-- Resizable panels. Move the file tree and viewer to either side.
-- Light and dark themes. Keyboard first, with full mouse support.
+| Area | What you get |
+| :-- | :-- |
+| 📋 Plans | Plan card with steps, files and risk. Files tick off as the agent edits them. |
+| 📝 Changes | Changes card after each turn, with line counts, a diff viewer and Undo turn. Revert one file. Redo the last undo. |
+| ✋ Permissions | Prompts appear inline. Edits inside the plan run without asking. Shell commands keep their normal rule. |
+| ⏹️ Stop | <kbd>Ctrl</kbd>+<kbd>.</kbd> cancels the turn and ends every process the agent started. |
+| 💾 Sessions | Several per project, named, saved and resumed with their history. |
+| 📁 Files | File tree with clear icons, fuzzy file picker, project-wide search. |
+| 📖 Viewer | Code and diffs. Markdown renders as a document: tables, task lists, alerts, images, links between files. |
+| 💻 Terminal | A terminal drawer that opens in the project folder. |
+| ⌨️ Commands | Command palette, model picker, `@` to mention files, `/` for agent commands. |
+| 🪟 Layout | Resizable panels. Move the file tree and the viewer to either side. |
+| 🎨 Themes | Light and dark. Keyboard first, with full mouse support. |
+| 🔄 Updates | Signed auto-updates from GitHub Releases. You choose when to restart. |
 
-## Download
+## ⬇️ Download
 
-Get the Windows installer from the [latest release](https://github.com/yobotn/focuside/releases/latest). The app updates itself when a new version is out.
+| Platform | Status |
+| :-- | :-- |
+| 🪟 **Windows 10 / 11** | [**Download the installer**](https://github.com/yobotn/focuside/releases/latest) (`FocusIDE_x.y.z_x64-setup.exe`) |
+| 🍎 macOS | Builds in CI. Build from source for now. |
+| 🐧 Linux | Builds in CI. Build from source for now. |
 
-macOS and Linux build in CI and ship later. For now, build them from source.
+> [!NOTE]
+> The installer is not code-signed yet, so Windows SmartScreen may warn. Choose **More info**, then **Run anyway**. After that, the app updates itself.
 
-### Requirements
+### ✅ Requirements
 
-- **An agent.** FocusIDE runs the agent you install and set up yourself. For Claude Code: `npm install -g @anthropic-ai/claude-code`, plus an API key or a cloud provider (see below). Other agents are listed in Settings.
+- **An agent you installed yourself.** For Claude Code: `npm install -g @anthropic-ai/claude-code`. Other agents are listed in **Settings**, with their install command.
+- **Git.** Undo turn keeps snapshots in a private git repo. Your project does not need to be a git repo.
 
-**Claude needs an API key.** Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans (Pro, Max, Team, Enterprise). FocusIDE connects to Claude Code through an Agent SDK based adapter, so it starts Claude only with an API key (`ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys)) or a cloud provider (Amazon Bedrock, Google Vertex AI, Microsoft Foundry). Claude Code reads the key; FocusIDE never reads or stores it. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
-- **Git.** Undo turn uses a private git repo for snapshots. Your project does not need to be a git repo.
+> [!IMPORTANT]
+> **Claude needs an API key or a cloud provider.** Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans (Pro, Max, Team, Enterprise). FocusIDE connects to Claude Code through an Agent SDK based adapter, so it starts Claude only with:
+>
+> - an API key in `ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys), or
+> - Amazon Bedrock, Google Vertex AI or Microsoft Foundry.
+>
+> Claude Code reads the key. FocusIDE never reads or stores it. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
 
-## Keyboard shortcuts
+## 🔌 Agents
 
-`Ctrl` is `Cmd` on macOS.
+| Agent | How FocusIDE starts it | Notes |
+| :-- | :-- | :-- |
+| Claude Code | Bundled `claude-agent-acp` adapter, which runs your own `claude` | API key or cloud provider. Full plan mode. |
+| Codex | `codex-acp` | Install it yourself. |
+| Gemini CLI | `gemini --experimental-acp` | Install it yourself. |
+| OpenCode | `opencode acp` | Install it yourself. |
+| Qwen Code | `qwen --experimental-acp` | Install it yourself. |
+| Goose | `goose acp` | Install it yourself. |
+| Anything else | **Settings > Custom command** | Any ACP agent. `NAME=value` at the start sets environment variables. |
+
+Plan first needs an agent with a plan mode. Snapshots, the scope guard and Undo turn work with every agent.
+
+## ⌨️ Keyboard shortcuts
+
+<kbd>Ctrl</kbd> is <kbd>Cmd</kbd> on macOS.
 
 | Keys | Action |
-| --- | --- |
-| `Ctrl+K` | Command palette |
-| `Ctrl+P` | Open a file |
-| `Ctrl+Shift+F` | Search in the project |
-| `Ctrl+Enter` | Run the waiting plan |
-| `Ctrl+.` | Stop the running turn |
-| `Ctrl+J` | Waiting queue, across projects |
-| `Ctrl+E` | Sessions in this project |
-| `Ctrl+B` | Show or hide the file tree |
-| `` Ctrl+` `` | Show or hide the terminal |
-| `Ctrl+S` | Save the file in the viewer |
-| `R` / `U` | Review or undo a finished turn (on the changes card) |
-| `J` / `K` | Next or previous file in the diff viewer |
-| `Esc` | Close an overlay or the viewer. Stops a running turn when nothing is open |
+| :-- | :-- |
+| <kbd>Ctrl</kbd>+<kbd>K</kbd> | Command palette |
+| <kbd>Ctrl</kbd>+<kbd>P</kbd> | Open a file |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Search in the project |
+| <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Run the waiting plan |
+| <kbd>Ctrl</kbd>+<kbd>.</kbd> | Stop the running turn |
+| <kbd>Ctrl</kbd>+<kbd>J</kbd> | Waiting queue, across projects |
+| <kbd>Ctrl</kbd>+<kbd>E</kbd> | Sessions in this project |
+| <kbd>Ctrl</kbd>+<kbd>B</kbd> | Show or hide the file tree |
+| <kbd>Ctrl</kbd>+<kbd>`</kbd> | Show or hide the terminal |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the file in the viewer |
+| <kbd>R</kbd> / <kbd>U</kbd> | Review or undo a finished turn (on the changes card) |
+| <kbd>J</kbd> / <kbd>K</kbd> | Next or previous file in the diff viewer |
+| <kbd>Esc</kbd> | Close an overlay or the viewer. Stops a running turn when nothing is open |
 
-## How it works
+## ⚙️ How it works
 
-1. **FocusIDE starts your agent** over the [Agent Client Protocol](https://agentclientprotocol.com) (ACP). Claude Code connects through the bundled `claude-agent-acp` adapter, which runs your own installed `claude` binary.
-2. **Before each turn, it takes a snapshot** of the project in a separate git repo inside the app's data folder. Your repo, branches and history are never touched.
-3. **During the turn, it compares** each file the agent touches with the plan. After the turn, it shows the changes and keeps the snapshot so you can undo.
+1. 🔌 **FocusIDE starts your agent** over the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), in your project folder.
+2. 📸 **Before each turn, it takes a snapshot** of the project in a separate git repo inside the app's data folder. Your repo, branches and history are never touched.
+3. 👀 **During the turn, it compares** each file the agent touches with the plan. After the turn, it shows the changes and keeps the snapshot so you can undo.
 
-**Your code stays on your machine.** FocusIDE has no server, no account and no telemetry. It never reads, stores or proxies your agent credentials. The agent talks to its own provider exactly as it does in your terminal.
+🔒 **Your code stays on your machine.** FocusIDE has no server, no account and no telemetry. The agent talks to its own provider exactly as it does in your terminal.
 
-## Build from source
+## 🛠️ Build from source
 
 Needs Rust (stable), Node 22+ and git.
 
@@ -109,22 +160,43 @@ npm test                         # Rust tests
 npm run build                    # installer for this OS
 ```
 
+<details>
+<summary>🏗️ Stack and project layout</summary>
+
+| Part | Tech |
+| :-- | :-- |
+| App shell, agent connection, snapshots, terminal | Tauri 2, Rust |
+| UI | Svelte 5, Tailwind 4, CodeMirror 6, xterm.js |
+| Agent protocol | Agent Client Protocol (JSON-RPC over stdio) |
+
+```
+apps/desktop/        Tauri app (src-tauri/ is Rust, src/ is Svelte)
+crates/core/         ACP client, snapshots, plan parser, process trees
+crates/spike/        command line test client for the agent protocol
+scripts/             lint, icons, adapter download
+site/                the website (GitHub Pages)
+```
+
+See [PLAN.md](PLAN.md) for the product plan and build results, and [AGENTS.md](AGENTS.md) if you use a coding agent on this repo.
+
+</details>
+
 Open a folder from a terminal with `FocusIDE.exe <folder>`. A running window takes the folder.
 
-The stack is Tauri 2 and Rust for the app shell, agent connection, snapshots and terminal, with Svelte 5, Tailwind 4 and CodeMirror 6 for the UI. See [PLAN.md](PLAN.md) for the product plan and the build results, and [AGENTS.md](AGENTS.md) if you use a coding agent on this repo.
+## 🐛 Report a bug
 
-## Report a bug
+- In the app: **Settings > Report a bug** fills in your version and OS.
+- On GitHub: [open an issue](https://github.com/yobotn/focuside/issues/new/choose).
+- 🔐 Security problems: [private security advisories](https://github.com/yobotn/focuside/security/advisories/new), not public issues.
 
-Open an [issue on GitHub](https://github.com/yobotn/focuside/issues/new/choose). You can also use **Report an issue** in the app, which fills in your version and OS. Security problems go to [private security advisories](https://github.com/yobotn/focuside/security/advisories/new), not public issues.
+## 🤝 Contributing
 
-## Contributing
+Pull requests are welcome. Please open an issue first for anything larger than a small fix, so we can agree on the approach. Run `npm run lint` and `npm test` before you push. UI text is short and literal, with no emojis and no em dashes (the text lint checks this; this README is the one exception for emojis).
 
-Pull requests are welcome. Please open an issue first for anything larger than a small fix, so we can agree on the approach. Run `npm run lint` and `npm test` before you push. UI text is short and literal, with no emojis and no em dashes (the text lint checks this).
-
-## License
+## 📄 License
 
 [Apache 2.0](LICENSE).
 
-## Trademarks
+## ™️ Trademarks
 
 FocusIDE is an independent project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic. Other agent names are trademarks of their owners. FocusIDE works with these agents. It does not include them.
