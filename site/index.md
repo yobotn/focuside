@@ -10,7 +10,7 @@ FocusIDE is a free, open source desktop app for AI coding agents. It shows a sho
 ## Key facts
 
 - **What:** a desktop app for AI coding agents
-- **Price:** free, Apache 2.0
+- **Price:** free, GPL 3.0
 - **Runs:** on your machine, no server
 - **Agents:** Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose, any ACP agent
 - **Platforms:** Windows 10 and 11 installer. macOS and Linux from source.
@@ -49,7 +49,7 @@ FocusIDE starts the agent you already use, over the open [Agent Client Protocol]
 A free, open source desktop app for working with AI coding agents. The conversation with the agent is the center of the window. It shows a plan before any file changes, marks files the agent changes outside the plan, and can undo a whole turn with one key.
 
 **Is FocusIDE free?**
-Yes. Apache 2.0. You pay only for your agent, under your own plan with its provider.
+Yes. GPL 3.0. You pay only for your agent, under your own plan with its provider.
 
 **Which AI agents does FocusIDE work with?**
 Claude Code works with an API key or a cloud provider. Codex, Gemini CLI, OpenCode, Qwen Code and Goose work when installed. Any other ACP agent works through a custom command.
