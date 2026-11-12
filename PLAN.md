@@ -2,7 +2,7 @@
 
 The simplest IDE for working with AI agents. You read, approve and check. The agent types. Windows first, then macOS and Linux.
 
-Website: [focuside.dev](https://focuside.dev). Repository: `github.com/yobotn/focuside` (public, not created yet). License: Apache 2.0.
+Website: [focuside.dev](https://focuside.dev). Repository: `github.com/yobotn/focuside` (public). License: GPL-3.0-only (changed from Apache 2.0 on 2026-11-12, before the first published release).
 
 Status: M0 to M3 built and checked on Windows (see section 10). Next: M4, two weeks of daily use. Last updated 2026-11-12.
 
@@ -452,7 +452,7 @@ Build the signature slice first. It is what makes FocusIDE worth using.
 | Phosphor UI icons, Symbols file icons | Calm and distinctive, avoids the default AI-app look |
 | Plain words: Run plan, Discard, Pause, Undo turn, Plan first | Clear for non-native speakers. "Build" reads as compile |
 | Name FocusIDE, focuside.dev main, focuside.app redirect | Real word, easy in any language, says the promise |
-| Apache 2.0, public repo | Same as Keeprun: patent grant, fits a support-based business model |
+| GPL-3.0-only, public repo | Changed from Apache 2.0 by the owner on 2026-11-12. Forks must stay open source; the owner, as the only copyright holder, can still offer commercial licenses |
 | Always know where you are is a core requirement | Owner's long-standing pain with Claude Code in terminals |
 
 ### Spike results (M0.5, 2026-11-12, claude-agent-acp 0.106.0, Claude Code 2.1.322, Windows 11)

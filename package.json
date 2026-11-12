@@ -2,7 +2,7 @@
   "name": "focuside",
   "private": true,
   "description": "The simplest IDE for working with AI agents.",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-only",
   "scripts": {
     "setup": "npm --prefix apps/desktop install",
     "dev": "npm --prefix apps/desktop run tauri:dev",

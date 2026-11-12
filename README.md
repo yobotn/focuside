@@ -13,7 +13,7 @@
   <a href="https://github.com/yobotn/focuside/releases/latest"><img src="https://img.shields.io/github/v/release/yobotn/focuside?label=release&color=22c55e&logo=github" alt="Latest release"></a>
   <a href="https://github.com/yobotn/focuside/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/yobotn/focuside/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
   <a href="https://github.com/yobotn/focuside/releases"><img src="https://img.shields.io/github/downloads/yobotn/focuside/total?color=22c55e&label=downloads" alt="Downloads"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache 2.0"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL 3.0"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?logo=windows&logoColor=white" alt="Platform: Windows 10 and 11">
   <img src="https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-24c8db?logo=tauri&logoColor=white" alt="Built with Tauri 2 and Rust">
 </p>
@@ -195,7 +195,9 @@ Pull requests are welcome. Please open an issue first for anything larger than a
 
 ## 📄 License
 
-[Apache 2.0](LICENSE).
+[GNU General Public License v3.0](LICENSE) (GPL-3.0-only). You may use, change and share FocusIDE. If you share a changed version, it must stay open source under the same license.
+
+Copyright (C) 2026 yobotn.
 
 ## ™️ Trademarks
 
