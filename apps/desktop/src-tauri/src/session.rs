@@ -4,7 +4,7 @@
 //! Events go to the UI as `session` events: `{ key, kind, ... }`.
 
 use crate::project::Project;
-use crate::turns::{now, TurnRecord};
+use crate::turn_recorder::{new_id, TurnEnd, TurnRecorder};
 use anyhow::{anyhow, bail, Result};
 use focuside_core::acp::{
     self, AgentCommand, AgentProcess, Capabilities, Connection, Incoming, PermissionOption,
@@ -66,21 +66,15 @@ pub struct Session {
     start_lock: tokio::sync::Mutex<()>,
     st: Mutex<State>,
     generation: AtomicU64,
-}
-
-fn new_id(prefix: &str) -> String {
-    static N: AtomicU64 = AtomicU64::new(0);
-    let ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    format!("{prefix}{ms:x}{}", N.fetch_add(1, Ordering::Relaxed))
+    recorder: TurnRecorder,
 }
 
 impl Session {
     pub fn new(app: AppHandle, project: Arc<Project>, cmd: AgentCommand) -> Arc<Self> {
+        let key = new_id("s");
         Arc::new(Self {
-            key: new_id("s"),
+            recorder: TurnRecorder::new(project.clone(), &key),
+            key,
             project,
             app,
             cmd,
@@ -144,8 +138,8 @@ impl Session {
         }
         self.emit("starting", json!({}));
         // Chat mode takes an API key or a cloud provider (Anthropic's rule for Agent SDK apps).
-        // Other logins are not refused but routed: the UI sends the user to Claude's own
-        // terminal app, which keeps every login method of the `claude` binary.
+        // Other logins are not refused but routed: the UI opens a Claude pane, the unmodified
+        // `claude` TUI, which keeps every login method of the `claude` binary.
         if let Some(claude) = &self.cmd.claude {
             match agent::claude_auth(claude, &self.cmd.env).await {
                 Ok(auth) => {
@@ -490,7 +484,7 @@ impl Session {
         if !is_plan {
             bail!("Not a plan request.");
         }
-        if !self.project.claim(&self.key) {
+        if !self.recorder.claim() {
             bail!("otherRunning");
         }
         let turn_id = self
@@ -501,23 +495,7 @@ impl Session {
             .as_ref()
             .map(|t| t.id.clone())
             .unwrap_or_else(|| new_id("t"));
-        let snap = {
-            let repo = &self.project.shadow;
-            let _g = repo.lock.lock().await;
-            repo.snapshot(
-                &format!("refs/fi/{}/{}/start", self.key, turn_id),
-                "turn start",
-            )
-            .await
-        };
-        let snap = match snap {
-            Ok(s) => s,
-            Err(e) => {
-                self.project.release(&self.key);
-                bail!("snapshot: {e:#}");
-            }
-        };
-        *self.project.watch_log.lock().unwrap() = Some(BTreeSet::new());
+        let snap = self.recorder.start(&turn_id).await?;
         let (option, switch) = acp::run_plan_option(&options)
             .ok_or_else(|| anyhow!("The agent offered no way to run the plan."))?;
         {
@@ -635,43 +613,15 @@ impl Session {
         let turn_id = continue_turn.clone().unwrap_or_else(|| new_id("t"));
         let mut start = None;
         if !plan_first || continued {
-            if !self.project.claim(&self.key) {
+            if !self.recorder.claim() {
                 bail!("otherRunning");
             }
-            let existing = continue_turn.as_ref().and_then(|id| {
-                self.project
-                    .turns
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .find(|t| &t.id == id)
-                    .map(|t| t.start.clone())
-            });
-            if existing.is_none() {
-                *self.project.watch_log.lock().unwrap() = Some(BTreeSet::new());
-            }
+            let existing = continue_turn
+                .as_ref()
+                .and_then(|id| self.recorder.existing_start(id));
             start = Some(match existing {
-                Some(commit) => Snapshot {
-                    commit,
-                    not_covered: vec![],
-                },
-                None => {
-                    let repo = &self.project.shadow;
-                    let _g = repo.lock.lock().await;
-                    match repo
-                        .snapshot(
-                            &format!("refs/fi/{}/{}/start", self.key, turn_id),
-                            "turn start",
-                        )
-                        .await
-                    {
-                        Ok(s) => s,
-                        Err(e) => {
-                            self.project.release(&self.key);
-                            bail!("snapshot: {e:#}");
-                        }
-                    }
-                }
+                Some(snap) => snap,
+                None => self.recorder.start(&turn_id).await?,
             });
         }
 
@@ -739,110 +689,23 @@ impl Session {
         });
 
         if let Some(start) = &turn.start {
-            let repo = self.project.shadow.clone();
-            let res = async {
-                let _g = repo.lock.lock().await;
-                let end = repo
-                    .snapshot(&format!("refs/fi/{}/{}/end", self.key, turn.id), "turn end")
-                    .await?;
-                let changes = repo.diff(&start.commit, &end.commit).await?;
-                // Files the watcher saw change that snapshots do not cover (ignored files).
-                let seen: Vec<String> = self
-                    .project
-                    .watch_log
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|p| !changes.files.iter().any(|f| &f.path == p))
-                    .collect();
-                let mut ignored = repo.ignored(&seen).await.unwrap_or_default();
-                ignored.truncate(20);
-                anyhow::Ok((end, changes, ignored))
-            }
-            .await;
+            let commands: Vec<String> = turn.commands.iter().map(|(_, c)| c.clone()).collect();
+            let res = self
+                .recorder
+                .finish(TurnEnd {
+                    id: &turn.id,
+                    start,
+                    edits: &turn.edits,
+                    commands,
+                    your_edits: &turn.your_edits,
+                    continued: turn.continued,
+                    tools_known: true,
+                })
+                .await;
             match res {
-                Ok((end, changes, ignored)) => {
-                    let mut not_covered = start.not_covered.clone();
-                    for n in end.not_covered {
-                        if !not_covered.contains(&n) {
-                            not_covered.push(n);
-                        }
-                    }
-                    let commands: Vec<String> =
-                        turn.commands.iter().map(|(_, c)| c.clone()).collect();
-                    // Writes the session's own tools do not explain, in a turn without shell
-                    // commands, came from somewhere else.
-                    let outside = commands.is_empty()
-                        && changes.files.iter().any(|f| {
-                            !turn.edits.contains(&f.path) && !turn.your_edits.contains(&f.path)
-                        });
-                    {
-                        let mut turns = self.project.turns.lock().unwrap();
-                        let existing = turns.iter_mut().find(|t| t.id == turn.id);
-                        match existing {
-                            Some(rec) if turn.continued => {
-                                rec.end = Some(end.commit.clone());
-                                rec.changes = changes.clone();
-                                rec.commands.extend(commands.clone());
-                                rec.edits.extend(turn.edits.iter().cloned());
-                                rec.your_edits.extend(turn.your_edits.iter().cloned());
-                                rec.not_covered = not_covered.clone();
-                                rec.undone = None;
-                                for p in &ignored {
-                                    if !rec.ignored_changed.contains(p) {
-                                        rec.ignored_changed.push(p.clone());
-                                    }
-                                }
-                            }
-                            _ => turns.push(TurnRecord {
-                                id: turn.id.clone(),
-                                session_key: self.key.clone(),
-                                start: start.commit.clone(),
-                                end: Some(end.commit.clone()),
-                                changes: changes.clone(),
-                                not_covered: not_covered.clone(),
-                                commands: commands.clone(),
-                                edits: turn.edits.iter().cloned().collect(),
-                                your_edits: turn.your_edits.iter().cloned().collect(),
-                                ignored_changed: ignored.clone(),
-                                undone: None,
-                                created: now(),
-                            }),
-                        }
-                    }
-                    self.project.save_turns();
-                    let all_commands: Vec<String> = self
-                        .project
-                        .turns
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .find(|t| t.id == turn.id)
-                        .map(|t| t.commands.clone())
-                        .unwrap_or_default();
-                    data["changes"] = json!(changes);
-                    data["notCovered"] = json!(not_covered);
-                    data["commands"] = json!(all_commands);
-                    data["outside"] = json!(outside);
-                    data["yourEdits"] = json!(turn.your_edits);
-                    data["ignoredChanged"] = json!(ignored);
-                }
-                Err(e) => {
-                    data["snapshotError"] = json!(format!("{e:#}"));
-                }
+                Ok(r) => r.write_to(&mut data),
+                Err(e) => data["snapshotError"] = json!(format!("{e:#}")),
             }
-            self.project.release(&self.key);
-            let repo = self.project.shadow.clone();
-            tauri::async_runtime::spawn(async move {
-                let _g = repo.lock.lock().await;
-                if let Ok(dropped) = repo.prune(now()).await {
-                    if !dropped.is_empty() {
-                        let _ = repo.gc().await;
-                    }
-                }
-            });
         }
         self.emit("turn_ended", data);
 
@@ -905,7 +768,7 @@ impl Session {
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.kill().await;
         self.st.lock().unwrap().alive = false;
-        self.project.release(&self.key);
+        self.recorder.release();
     }
 
     pub fn note_undo(&self, on: bool) {

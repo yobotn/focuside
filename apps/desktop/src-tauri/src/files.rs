@@ -70,9 +70,14 @@ pub async fn fs_write(
     let p = project(&state, &project_id)?;
     files::write_file(&p.root, &path, &content).map_err(|e| format!("{e:#}"))?;
     if let Some(key) = p.running_session() {
+        let rel = path.replace('\\', "/");
         let s = state.sessions.lock().unwrap().get(&key).cloned();
         if let Some(s) = s {
-            s.note_user_save(&path.replace('\\', "/"));
+            s.note_user_save(&rel);
+        }
+        let pane = state.panes.lock().unwrap().get(&key).cloned();
+        if let Some(pane) = pane {
+            pane.note_user_save(&rel);
         }
     }
     Ok(())

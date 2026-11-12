@@ -111,7 +111,7 @@ pub struct ClaudeAuth {
 /// Which kind of login Claude Code uses. Chat mode runs through the Claude Agent SDK (the
 /// bundled adapter), and Anthropic asks SDK apps to use API key authentication. So chat mode
 /// takes an API key (ANTHROPIC_API_KEY or apiKeyHelper) or a cloud provider. A Claude plan login
-/// is not refused: it is routed to Claude's own terminal app (see `ClaudeRoute`). FocusIDE never
+/// is not refused: it is routed to a Claude pane, the unmodified TUI (see `ClaudeRoute`). FocusIDE never
 /// changes or hides a login method of the `claude` binary. See docs/agent-terms.md and
 /// https://code.claude.com/docs/en/legal-and-compliance (Authentication and credential use).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -124,20 +124,20 @@ pub enum ClaudeAccess {
 }
 
 /// Where FocusIDE runs Claude for a given login. Chat mode is FocusIDE's own UI over ACP.
-/// Terminal means the user runs the unmodified `claude` in the terminal drawer, with its own
-/// login. FocusIDE opens the drawer but never types into it. A later version adds a pane route.
+/// Pane means the unmodified `claude` TUI in a PTY in the center view (pane mode), with its
+/// own login. The user types every prompt there; FocusIDE never types into it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClaudeRoute {
     Chat,
-    Terminal,
+    Pane,
 }
 
 impl ClaudeAccess {
     pub fn route(self) -> ClaudeRoute {
         match self {
             ClaudeAccess::Allowed => ClaudeRoute::Chat,
-            ClaudeAccess::Subscription | ClaudeAccess::SignedOut => ClaudeRoute::Terminal,
+            ClaudeAccess::Subscription | ClaudeAccess::SignedOut => ClaudeRoute::Pane,
         }
     }
 }
@@ -224,6 +224,11 @@ pub struct AgentSpec {
     pub args: &'static [&'static str],
     /// Shown when the program is missing.
     pub install: &'static str,
+    /// The agent's own interactive TUI, for pane mode. None when the agent has none.
+    pub tui_program: Option<&'static str>,
+    /// Arguments for the TUI. Never a flag that picks a login method, never `-p`, `--bare` or
+    /// `--append-system-prompt`: pane mode runs the agent as the user would in a terminal.
+    pub tui_args: &'static [&'static str],
 }
 
 pub const AGENTS: &[AgentSpec] = &[
@@ -233,6 +238,9 @@ pub const AGENTS: &[AgentSpec] = &[
         program: "claude",
         args: &[],
         install: "npm install -g @anthropic-ai/claude-code",
+        // Verified: `claude` starts the interactive TUI (code.claude.com/docs/en/cli-reference).
+        tui_program: Some("claude"),
+        tui_args: &[],
     },
     AgentSpec {
         id: "codex",
@@ -240,6 +248,9 @@ pub const AGENTS: &[AgentSpec] = &[
         program: "codex-acp",
         args: &[],
         install: "npm install -g @agentclientprotocol/codex-acp",
+        // `codex` with no subcommand starts the TUI (Codex CLI docs). Not run on this machine.
+        tui_program: Some("codex"),
+        tui_args: &[],
     },
     AgentSpec {
         id: "gemini",
@@ -247,6 +258,9 @@ pub const AGENTS: &[AgentSpec] = &[
         program: "gemini",
         args: &["--acp"],
         install: "npm install -g @google/gemini-cli",
+        // `gemini` with no prompt starts the interactive CLI (Gemini CLI docs). Not run here.
+        tui_program: Some("gemini"),
+        tui_args: &[],
     },
     AgentSpec {
         id: "opencode",
@@ -254,6 +268,9 @@ pub const AGENTS: &[AgentSpec] = &[
         program: "opencode",
         args: &["acp"],
         install: "npm install -g opencode-ai",
+        // `opencode` with no subcommand starts the TUI (OpenCode docs). Not run here.
+        tui_program: Some("opencode"),
+        tui_args: &[],
     },
     AgentSpec {
         id: "qwen",
@@ -261,6 +278,9 @@ pub const AGENTS: &[AgentSpec] = &[
         program: "qwen",
         args: &["--acp", "--experimental-skills"],
         install: "npm install -g @qwen-code/qwen-code",
+        // Unverified: `qwen` with no prompt starts the interactive CLI (a Gemini CLI fork).
+        tui_program: Some("qwen"),
+        tui_args: &[],
     },
     AgentSpec {
         id: "goose",
@@ -268,6 +288,10 @@ pub const AGENTS: &[AgentSpec] = &[
         program: "goose",
         args: &["acp"],
         install: "https://block.github.io/goose/docs/getting-started/installation",
+        // Verified in the docs: "goose session" starts an interactive session
+        // (documentation/docs/guides/goose-cli-commands.md). Not run here.
+        tui_program: Some("goose"),
+        tui_args: &["session"],
     },
 ];
 
@@ -279,6 +303,8 @@ pub struct AgentInfo {
     pub name: String,
     pub path: Option<PathBuf>,
     pub install: String,
+    /// The agent's TUI is installed, so it can open in a pane.
+    pub tui: bool,
 }
 
 pub fn agents() -> Vec<AgentInfo> {
@@ -293,8 +319,47 @@ pub fn agents() -> Vec<AgentInfo> {
                 which::find(a.program)
             },
             install: a.install.into(),
+            tui: tui_command(a.id).is_ok(),
         })
         .collect()
+}
+
+/// An agent's own TUI, resolved for a PTY: the program, its arguments, and nothing else. The
+/// environment is the app's own (no variable added or removed, so the agent's login stays the
+/// one the user set up).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TuiCommand {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+}
+
+/// Flags pane mode never passes: they force a login method, skip the user's setup, run without
+/// a human, or put FocusIDE text into the model context.
+pub const FORBIDDEN_TUI_FLAGS: &[&str] = &[
+    "-p",
+    "--print",
+    "--bare",
+    "--append-system-prompt",
+    "--system-prompt",
+    "--settings",
+];
+
+/// The TUI command for an agent id, found with the same lookup as chat mode (PATH through
+/// `which`, npm shims followed, `node <script>` when the shim points at a script).
+pub fn tui_command(id: &str) -> Result<TuiCommand, Missing> {
+    let spec = AGENTS
+        .iter()
+        .find(|a| a.id == id || (id.is_empty() && a.id == "claude"))
+        .ok_or(Missing::Agent)?;
+    let program = spec.tui_program.ok_or(Missing::Agent)?;
+    let path = if spec.id == "claude" {
+        locate_claude().ok_or(Missing::Claude)?
+    } else {
+        which::find(program).ok_or(Missing::Agent)?
+    };
+    let args = spec.tui_args.iter().map(|s| s.to_string()).collect();
+    let (program, args) = runnable(path, args);
+    Ok(TuiCommand { program, args })
 }
 
 /// A program found on PATH as something `Command` can start: npm shims on Windows become
@@ -430,8 +495,8 @@ mod tests {
         );
         assert_eq!(a(json!({"loggedIn": false})), ClaudeAccess::SignedOut);
         assert_eq!(ClaudeAccess::Allowed.route(), ClaudeRoute::Chat);
-        assert_eq!(ClaudeAccess::Subscription.route(), ClaudeRoute::Terminal);
-        assert_eq!(ClaudeAccess::SignedOut.route(), ClaudeRoute::Terminal);
+        assert_eq!(ClaudeAccess::Subscription.route(), ClaudeRoute::Pane);
+        assert_eq!(ClaudeAccess::SignedOut.route(), ClaudeRoute::Pane);
     }
 
     /// Runs the real `claude auth status` on this machine: `cargo test -- --ignored real_claude`.
@@ -453,6 +518,25 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(with_key.access(), ClaudeAccess::Allowed);
+    }
+
+    #[test]
+    fn tui_commands_pass_no_forbidden_flags() {
+        for a in AGENTS {
+            assert!(a.tui_program.is_some(), "{} has a TUI", a.id);
+            for arg in a.tui_args {
+                assert!(
+                    !FORBIDDEN_TUI_FLAGS.contains(arg),
+                    "{} passes {arg} in pane mode",
+                    a.id
+                );
+            }
+        }
+        let claude = AGENTS.iter().find(|a| a.id == "claude").unwrap();
+        assert_eq!(claude.tui_program, Some("claude"));
+        assert!(claude.tui_args.is_empty());
+        assert_eq!(tui_command("custom"), Err(Missing::Agent));
+        assert_eq!(tui_command("nope"), Err(Missing::Agent));
     }
 
     #[test]

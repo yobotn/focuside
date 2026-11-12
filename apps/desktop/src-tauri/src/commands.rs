@@ -1,5 +1,6 @@
 //! Tauri commands. Errors go to the UI as plain strings.
 
+use crate::pane::Pane;
 use crate::project::{Project, ProjectInfo};
 use crate::session::Session;
 use crate::turns;
@@ -24,6 +25,25 @@ fn project(state: &AppState, id: &str) -> Res<Arc<Project>> {
         .get(id)
         .cloned()
         .ok_or_else(|| "This project is not open.".to_string())
+}
+
+fn pane(state: &AppState, key: &str) -> Res<Arc<Pane>> {
+    state
+        .panes
+        .lock()
+        .unwrap()
+        .get(key)
+        .cloned()
+        .ok_or_else(|| "This session is closed.".to_string())
+}
+
+/// "missing:<what>" for the UI, which shows the install hint or the download.
+fn missing(m: agent::Missing) -> String {
+    match m {
+        agent::Missing::Claude => "missing:claude".to_string(),
+        agent::Missing::Adapter => "missing:adapter".to_string(),
+        agent::Missing::Agent => "missing:agent".to_string(),
+    }
 }
 
 fn session(state: &AppState, key: &str) -> Res<Arc<Session>> {
@@ -186,11 +206,25 @@ pub async fn project_close(state: State<'_, AppState>, id: String) -> Res<()> {
         s.close().await;
         state.sessions.lock().unwrap().remove(&s.key);
     }
+    let panes: Vec<Arc<Pane>> = state
+        .panes
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|p| p.project.id == id)
+        .cloned()
+        .collect();
+    for p in panes {
+        close_pane(&state, &p).await;
+    }
     state.projects.lock().unwrap().remove(&id);
     Ok(())
 }
 
 /// Creates a session and starts its agent in the background. Progress arrives as events.
+/// `mode` "pane" creates a pane session instead: the agent's own TUI, which the UI starts with
+/// `pty_open` and this session key. A pane always starts a fresh TUI; `resume` is not passed
+/// to the agent.
 #[tauri::command]
 pub async fn session_start(
     app: AppHandle,
@@ -199,17 +233,21 @@ pub async fn session_start(
     resume: Option<String>,
     agent_id: Option<String>,
     custom_command: Option<String>,
+    mode: Option<String>,
 ) -> Res<String> {
     let p = project(&state, &project_id)?;
+    if mode.as_deref() == Some("pane") {
+        let tui = agent::tui_command(agent_id.as_deref().unwrap_or("claude")).map_err(missing)?;
+        let pane = Pane::new(app, p, tui);
+        let key = pane.key.clone();
+        state.panes.lock().unwrap().insert(key.clone(), pane);
+        return Ok(key);
+    }
     let cmd = agent::agent_command(
         agent_id.as_deref().unwrap_or("claude"),
         custom_command.as_deref(),
     )
-    .map_err(|m| match m {
-        agent::Missing::Claude => "missing:claude".to_string(),
-        agent::Missing::Adapter => "missing:adapter".to_string(),
-        agent::Missing::Agent => "missing:agent".to_string(),
-    })?;
+    .map_err(missing)?;
     let s = Session::new(app, p, cmd);
     state
         .sessions
@@ -314,7 +352,45 @@ pub async fn session_close(state: State<'_, AppState>, key: String) -> Res<()> {
     if let Some(s) = s {
         s.close().await;
     }
+    let pane = state.panes.lock().unwrap().get(&key).cloned();
+    if let Some(p) = pane {
+        close_pane(&state, &p).await;
+    }
     Ok(())
+}
+
+/// Ends the pane's open turn, then kills its TUI and the processes it started.
+async fn close_pane(state: &AppState, p: &Arc<Pane>) {
+    state.panes.lock().unwrap().remove(&p.key);
+    p.close().await;
+    crate::pty::close_session(state, &p.key);
+}
+
+/// Checkpoint in a pane: ends the open turn (changes card, undo) and starts the next one.
+#[tauri::command]
+pub async fn session_checkpoint(state: State<'_, AppState>, key: String) -> Res<()> {
+    pane(&state, &key)?.checkpoint().await;
+    Ok(())
+}
+
+/// How the user's Claude Code is signed in, as a route: chat (API key or cloud provider) or
+/// pane (Claude plan or signed out). Null when `claude` is missing or the check failed. Only
+/// the method and provider are read (`claude auth status --json`).
+#[tauri::command]
+pub async fn claude_route() -> Value {
+    let Some(claude) = agent::locate_claude() else {
+        return Value::Null;
+    };
+    match agent::claude_auth(&claude, &[]).await {
+        Ok(auth) => {
+            let access = auth.access();
+            json!({ "access": access, "route": access.route() })
+        }
+        Err(e) => {
+            tracing::warn!("claude auth status: {e:#}");
+            Value::Null
+        }
+    }
 }
 
 #[tauri::command]
@@ -350,6 +426,23 @@ fn session_of_turn(state: &AppState, project_id: &str, turn_id: &str) -> Option<
     state.sessions.lock().unwrap().get(&key).cloned()
 }
 
+/// Undo and redo need the project free. A chat turn must finish first. A pane holds the claim
+/// for as long as its TUI runs, so its open turn is ended here (as with Checkpoint) and the
+/// caller starts the next one after the undo. Returns that pane.
+async fn open_pane_turn(state: &AppState, p: &Project) -> Res<Option<Arc<Pane>>> {
+    let Some(key) = p.running_session() else {
+        return Ok(None);
+    };
+    let pane = state.panes.lock().unwrap().get(&key).cloned();
+    match pane {
+        Some(pane) => {
+            pane.end_turn("undo").await;
+            Ok(Some(pane))
+        }
+        None => Err("Wait for the running turn to finish.".into()),
+    }
+}
+
 #[tauri::command]
 pub async fn turn_undo_preview(
     state: State<'_, AppState>,
@@ -370,12 +463,13 @@ pub async fn turn_undo(
     revert_anyway: Vec<String>,
 ) -> Res<turns::UndoOutcome> {
     let p = project(&state, &project_id)?;
-    if p.running_session().is_some() {
-        return Err("Wait for the running turn to finish.".into());
+    let pane = open_pane_turn(&state, &p).await?;
+    let out = turns::undo(&p, &turn_id, &revert_anyway).await;
+    if let Some(pane) = pane {
+        pane.begin().await;
     }
-    let out = turns::undo(&p, &turn_id, &revert_anyway)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
+    let out = out.map_err(|e| format!("{e:#}"))?;
+    // Chat sessions tell the agent in the next prompt. Panes never get text typed in.
     if let Some(s) = session_of_turn(&state, &project_id, &turn_id) {
         s.note_undo(true);
     }
@@ -389,12 +483,12 @@ pub async fn turn_redo(
     turn_id: String,
 ) -> Res<turns::UndoOutcome> {
     let p = project(&state, &project_id)?;
-    if p.running_session().is_some() {
-        return Err("Wait for the running turn to finish.".into());
+    let pane = open_pane_turn(&state, &p).await?;
+    let out = turns::redo(&p, &turn_id).await;
+    if let Some(pane) = pane {
+        pane.begin().await;
     }
-    let out = turns::redo(&p, &turn_id)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
+    let out = out.map_err(|e| format!("{e:#}"))?;
     if let Some(s) = session_of_turn(&state, &project_id, &turn_id) {
         s.note_undo(false);
     }

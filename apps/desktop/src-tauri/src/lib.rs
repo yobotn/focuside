@@ -2,9 +2,11 @@
 
 mod commands;
 mod files;
+mod pane;
 mod project;
 mod pty;
 mod session;
+mod turn_recorder;
 mod turns;
 
 use std::collections::HashMap;
@@ -18,6 +20,8 @@ pub struct AppState {
     pub git: Option<PathBuf>,
     pub projects: Mutex<HashMap<String, Arc<project::Project>>>,
     pub sessions: Mutex<HashMap<String, Arc<session::Session>>>,
+    /// Pane sessions: an agent's own TUI in a PTY. Keys share the namespace of `sessions`.
+    pub panes: Mutex<HashMap<String, Arc<pane::Pane>>>,
     pub ptys: Mutex<HashMap<String, pty::Pty>>,
     /// Folders passed on the command line (`focuside .`) before the UI was ready.
     pub startup_paths: Mutex<Vec<String>>,
@@ -87,6 +91,7 @@ pub fn run() {
                 git: focuside_core::which::find("git"),
                 projects: Mutex::default(),
                 sessions: Mutex::default(),
+                panes: Mutex::default(),
                 ptys: Mutex::default(),
                 startup_paths: Mutex::new(folder_args(&argv, &cwd)),
             });
@@ -113,6 +118,8 @@ pub fn run() {
             commands::session_close,
             commands::session_set_config,
             commands::session_list,
+            commands::session_checkpoint,
+            commands::claude_route,
             commands::turn_undo_preview,
             commands::turn_undo,
             commands::turn_redo,
