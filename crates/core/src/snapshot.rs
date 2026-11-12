@@ -186,9 +186,12 @@ impl ShadowRepo {
     fn command(&self, args: &[&str]) -> Command {
         let mut c = Command::new(&self.git);
         c.arg(format!("--git-dir={}", self.git_dir.display()))
-            .arg(format!("--work-tree={}", self.work_tree.display()))
-            .arg("--literal-pathspecs")
-            .arg("-c")
+            .arg(format!("--work-tree={}", self.work_tree.display()));
+        // Paths are never patterns. check-ignore rejects the flag (it takes paths, not specs).
+        if args.first() != Some(&"check-ignore") {
+            c.arg("--literal-pathspecs");
+        }
+        c.arg("-c")
             .arg(format!(
                 "core.hooksPath={}",
                 self.git_dir.join("no-hooks").display()
@@ -940,6 +943,22 @@ mod tests {
         assert!(!files.contains("big.bin"));
         assert!(!files.contains("vendor"));
         assert!(!files.contains(".env"));
+    }
+
+    #[tokio::test]
+    async fn ignored_files_are_found() {
+        let (proj, _data, repo) = setup().await;
+        let p = proj.path();
+        fs::create_dir_all(p.join("node_modules/x")).unwrap();
+        fs::write(p.join("node_modules/x/i.js"), "").unwrap();
+        repo.snapshot("refs/fi/s/5/start", "s").await.unwrap();
+        let seen = vec![
+            ".env".to_string(),
+            "src/a.rs".to_string(),
+            "node_modules/x/i.js".to_string(),
+        ];
+        // .env is ignored and not covered; src/a.rs is tracked; generated folders are left out.
+        assert_eq!(repo.ignored(&seen).await.unwrap(), vec![".env".to_string()]);
     }
 
     #[tokio::test]

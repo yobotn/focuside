@@ -251,7 +251,9 @@ impl Session {
         );
 
         let me = self.clone();
-        tokio::spawn(async move { me.read_loop(incoming, generation, stderr).await });
+        tauri::async_runtime::spawn(
+            async move { me.read_loop(incoming, generation, stderr).await },
+        );
         Ok(())
     }
 
@@ -367,7 +369,7 @@ impl Session {
         }
         if switch_mode {
             let me = self.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let _ = me.set_mode("acceptEdits").await;
             });
         }
@@ -669,7 +671,7 @@ impl Session {
             json!({ "turnId": turn_id, "planFirst": plan_first, "continued": continued }),
         );
         let me = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let r = conn
                 .request(
                     "session/prompt",
@@ -802,7 +804,7 @@ impl Session {
             }
             self.project.release(&self.key);
             let repo = self.project.shadow.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let _g = repo.lock.lock().await;
                 if let Ok(dropped) = repo.prune(now()).await {
                     if !dropped.is_empty() {
@@ -816,7 +818,7 @@ impl Session {
         let queued = self.st.lock().unwrap().queued.take();
         if let Some(text) = queued {
             let me = self.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let blocks = vec![json!({ "type": "text", "text": text })];
                 me.emit("revised", json!({ "text": blocks[0]["text"] }));
                 if let Err(e) = me.prompt(blocks, true, None).await {
@@ -845,7 +847,7 @@ impl Session {
         }
         let Some(turn_id) = turn_id else { return };
         let me = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             tokio::time::sleep(KILL_AFTER).await;
             let still = me
                 .st

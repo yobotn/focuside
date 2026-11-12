@@ -100,7 +100,12 @@ class AppStore {
     return p.sessions.some((s) => s.waiting);
   }
 
+  private inited = false;
+
+  /** Loads state and listens to events. Runs once, even if the UI mounts again (hot reload). */
   async init() {
+    if (this.inited) return;
+    this.inited = true;
     try {
       const raw = (await api.uiStateLoad()) as Partial<Persisted> | null;
       const st: Persisted = { ...defaults, ...(raw ?? {}), settings: { ...defaults.settings, ...(raw?.settings ?? {}) } };

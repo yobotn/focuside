@@ -4,7 +4,7 @@ The simplest IDE for working with AI agents. You read, approve and check. The ag
 
 Website: [focuside.dev](https://focuside.dev). Repository: `github.com/yobotn/focuside` (public, not created yet). License: Apache 2.0.
 
-Status: plan final after 2 review rounds (architecture, UX, adversarial). Next: M0. Last updated 2026-11-11.
+Status: M0 to M3 built and checked on Windows (see section 10). Next: M4, two weeks of daily use. Last updated 2026-11-12.
 
 ---
 
@@ -476,6 +476,36 @@ Build the signature slice first. It is what makes FocusIDE worth using.
 | Default mode | Follows the user's Claude Code setting (here `auto`). FocusIDE switches to `plan` for Plan first and to `acceptEdits` after Run plan, and restores the session's original mode for prompts without Plan first |
 
 ---
+
+### Build results (M1 to M3, 2026-11-12)
+
+| Check | Result |
+|---|---|
+| M1 done-when: the 20-second clip | Passed in a test repo. "add dark mode" gave a 5-step, 3-file plan. Mod+Enter ran it, file rows ticked, the changes card replaced the plan card in place. A second run that wrote CHANGELOG.md outside the plan showed it live in amber with Pause, and the changes card kept "Not in plan". Undo turn: every file matched the committed blob (SHA-1), the created file was removed, "Project is exactly as before" |
+| Run plan edits | Went through without asking. Shell commands still asked (permission row with the adapter's options) |
+| Stop | Mod+. ended the turn in about 1 s and killed the running ping. The 3 s tree kill is in place for agents that do not stop |
+| Agent killed from outside | "Agent stopped. Resume" appeared. Resume started the agent and resumed the session |
+| Resume from the sessions list | `session/load` replays the history into the conversation |
+| M2 done-when on Keeprun | Icons correct for .rs, .ts, .svelte, .md, .toml, .json, Cargo.toml (Rust icon), package.json. PLAN.md renders well. Mod+Shift+F found "fn main" across the repo and skipped ignored folders |
+| M3 | Terminal drawer (pwsh in the project folder), palette, light and dark themes, model picker from the adapter's config options, @ file picker, settings (6 rows), session list |
+| Tests | 24 Rust tests: plan parser, process tree kill, ACP round trip, run-plan option choice, snapshots (byte-for-byte undo with CRLF, binary, rename and generated folders; redo; conflicts; nested repos and big files; ignored files; pruning), file listing and search |
+
+Fixes found while checking:
+- Watching a big tree with notify-debouncer-full scanned the whole folder first (Keeprun's target/ took over 10 s). Switched to notify-debouncer-mini and moved watcher setup off the open path.
+- `git check-ignore` rejects `--literal-pathspecs`, so ignored-file detection returned nothing. The flag is now skipped for that command.
+- Sync Tauri commands run on the main thread, outside the Tokio runtime, so Stop crashed the app. Spawns now use `tauri::async_runtime`.
+- In dev, a hot reload ran the app setup again and every agent message showed three times. Setup now runs once.
+
+Not checked live yet (code is in place):
+- Two sessions in one project running at the same time (Run plan disabled with "Another session is running here.").
+- System notifications for a session in another project.
+- Image paste and drop (the adapter reports image support).
+- Sign-in flow when Claude Code is signed out.
+- macOS and Linux: built in CI only. The Unix process group code has not run on a real machine.
+
+Not done in v1, as planned or for packaging:
+- The `focuside` command line shim. The app already opens folders passed as arguments (`FocusIDE.exe <folder>`) and forwards them to the running window. Adding the shim to PATH belongs to packaging (v2/v3).
+- Revert one hunk (v2).
 
 ## 11. Open items
 

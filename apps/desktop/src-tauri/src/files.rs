@@ -31,7 +31,7 @@ pub async fn fs_list_dir(
     show_ignored: bool,
 ) -> Res<Vec<DirEntry>> {
     let p = project(&state, &project_id)?;
-    tokio::task::spawn_blocking(move || files::list_dir(&p.root, &path, show_ignored))
+    tauri::async_runtime::spawn_blocking(move || files::list_dir(&p.root, &path, show_ignored))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("{e:#}"))
@@ -40,7 +40,7 @@ pub async fn fs_list_dir(
 #[tauri::command]
 pub async fn fs_all_files(state: State<'_, AppState>, project_id: String) -> Res<Vec<String>> {
     let p = project(&state, &project_id)?;
-    tokio::task::spawn_blocking(move || files::all_files(&p.root))
+    tauri::async_runtime::spawn_blocking(move || files::all_files(&p.root))
         .await
         .map_err(|e| e.to_string())
 }
@@ -52,7 +52,7 @@ pub async fn fs_read(
     path: String,
 ) -> Res<FileContent> {
     let p = project(&state, &project_id)?;
-    tokio::task::spawn_blocking(move || files::read_file(&p.root, &path))
+    tauri::async_runtime::spawn_blocking(move || files::read_file(&p.root, &path))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("{e:#}"))
@@ -87,10 +87,12 @@ pub async fn fs_search(
     regex: bool,
 ) -> Res<SearchResult> {
     let p = project(&state, &project_id)?;
-    tokio::task::spawn_blocking(move || files::search(&p.root, &query, case_sensitive, regex, 2000))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| format!("{e:#}"))
+    tauri::async_runtime::spawn_blocking(move || {
+        files::search(&p.root, &query, case_sensitive, regex, 2000)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("{e:#}"))
 }
 
 /// Watches the project folder. Changes go to the UI as `fs-changed` events and, during a

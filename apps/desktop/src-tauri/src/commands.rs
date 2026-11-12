@@ -101,10 +101,10 @@ pub async fn project_open(
     state.projects.lock().unwrap().insert(id, p.clone());
     // Watching a big tree takes a moment; never hold up opening the project.
     let watched = p.clone();
-    tokio::task::spawn_blocking(move || crate::files::watch(app, &watched));
+    tauri::async_runtime::spawn_blocking(move || crate::files::watch(app, &watched));
     // Snapshot when the project opens, in the background, so the first turn is fast.
     let repo = p.shadow.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let _g = repo.lock.lock().await;
         if let Err(e) = repo.snapshot("refs/fi/opened", "project opened").await {
             tracing::warn!("open snapshot: {e:#}");
@@ -151,7 +151,7 @@ pub async fn session_start(
         .unwrap()
         .insert(s.key.clone(), s.clone());
     let key = s.key.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         if let Err(e) = s.start(resume, true).await {
             let msg = format!("{e:#}");
             if msg != "signin" {

@@ -16,12 +16,16 @@ Needs Rust, Node 22+, git and Claude Code (`claude`) on PATH.
 ```
 npm run setup                    # UI dependencies
 node scripts/fetch-adapter.mjs   # pinned claude-agent-acp binary for this OS
-npm run dev                      # the app
+npm run dev                      # the app (builds the file icons first)
 npm run lint                     # clippy, fmt, text lint, strings, svelte-check
 npm test                         # Rust tests
 ```
 
-See [PLAN.md](PLAN.md) for the product plan.
+Open a folder from a terminal with `FocusIDE.exe <folder>` (the `focuside` shim comes with the installer later). A running window takes the folder.
+
+Dev builds print UI errors and session events to stderr.
+
+See [PLAN.md](PLAN.md) for the product plan and build results, and [docs/daily-use.md](docs/daily-use.md) for the M4 notes.
 
 ## License
 
