@@ -103,7 +103,7 @@ flowchart LR
 > - an API key in `ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys), or
 > - Amazon Bedrock, Google Vertex AI or Microsoft Foundry.
 >
-> **With a Claude plan (Pro, Max, Team, Enterprise), run Claude in the terminal.** FocusIDE opens the terminal drawer, and you type `claude` there. Claude Code then runs with its own login. A Claude pane in FocusIDE is planned for a later version.
+> **With a Claude plan (Pro, Max, Team, Enterprise), Claude opens in a Claude pane.** The pane runs the unmodified `claude` terminal app in the center view, with its own login. You type every prompt there. FocusIDE shows the changes of each turn when you select Checkpoint, with Undo turn. Any installed agent with a terminal app can open in a pane (palette: "Open <agent> in a pane").
 >
 > Claude Code reads the key and runs its own login. FocusIDE never reads or stores credentials. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) and [docs/agent-terms.md](docs/agent-terms.md).
 

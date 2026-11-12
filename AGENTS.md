@@ -12,7 +12,7 @@ FocusIDE is a Tauri 2 desktop app. It starts an ACP coding agent (Claude Code th
 | --- | --- |
 | `crates/core` | Rust library: ACP client (`acp.rs`), agent lookup (`agent.rs`), plan parser (`plan.rs`), process trees (`proc.rs`), shadow git snapshots (`snapshot.rs`), files and search (`files.rs`), adapter download on first use (`adapter_download.rs`) |
 | `crates/spike` | Command line tool used to test ACP behavior without the UI |
-| `apps/desktop/src-tauri` | Tauri app: commands, sessions, turns, watcher, terminal |
+| `apps/desktop/src-tauri` | Tauri app: commands, chat sessions (`session.rs`), agent panes (`pane.rs`), turn recording (`turn_recorder.rs`), turns, watcher, PTYs |
 | `apps/desktop/src` | Svelte 5 UI. Stores in `lib/stores`, components in `lib/components`, strings in `lib/i18n/en.ts` |
 | `scripts` | Lint, i18n check, adapter download, icon build |
 | `site` | Static website for focuside.dev (GitHub Pages) |

@@ -396,7 +396,7 @@ Build the signature slice first. It is what makes FocusIDE worth using.
 
 | Risk | Mitigation |
 |---|---|
-| Claude subscription use through the Agent SDK (which the ACP adapter uses) counts against a separate Agent SDK credit, and third-party apps may not offer Claude.ai login without approval | FocusIDE never handles credentials, it only starts the user's own `claude`. Check Anthropic's policy before public release. Claude in the terminal drawer stays available |
+| Claude subscription use through the Agent SDK (which the ACP adapter uses) counts against a separate Agent SDK credit, and third-party apps may not offer Claude.ai login without approval | FocusIDE never handles credentials, it only starts the user's own `claude`. Check Anthropic's policy before public release. A Claude pane (the unmodified `claude` TUI with its own login) stays available |
 | ACP adapter changes or lacks a feature | Pinned versions, capability checks, M0.5 spike before any UI |
 | No way to add the plan format instruction | Fallback parser (first 6 points and paths). Decided in M0.5 |
 | Undo misses something (ignored files, nested repos, commands) | Every uncovered item is listed in the card and the confirm dialog. Never claim more than was restored |
@@ -538,16 +538,63 @@ Sources read: code.claude.com/docs/en/legal-and-compliance and code.claude.com/d
 
 ### Agent terms (2026-11-12)
 
-Research and plan: [docs/agent-terms.md](docs/agent-terms.md). Phase 0 and Phase 1 of that plan are done.
+Research and plan: [docs/agent-terms.md](docs/agent-terms.md). Phase 0, Phase 1 and Phase 2 of that plan are done.
 
 - Decision (owner): FocusIDE never has its own login for any agent and never reads, stores or proxies credentials. It only starts the user's installed agent, which runs its own login.
-- Claude plan logins are routed, not blocked. Blocking conflicts with the Commercial Terms clause that bars restricting "any authentication method built into" Claude Code. `Session::start` still runs `claude auth status --json`, but a plan login (or no login) now returns a routing result (`agent::ClaudeRoute`, event `claude_route`). The UI explains that chat mode needs an API key or a cloud provider, and offers "Open terminal", where the user types `claude` and Claude Code runs with its own login. FocusIDE does not type into the terminal. Phase 2 adds a `Pane` route.
+- Claude plan logins are routed, not blocked. Blocking conflicts with the Commercial Terms clause that bars restricting "any authentication method built into" Claude Code. `Session::start` still runs `claude auth status --json`, but a plan login (or no login) now returns a routing result (`agent::ClaudeRoute`, event `claude_route`). The UI explains that chat mode needs an API key or a cloud provider, and offers "Open terminal", where the user types `claude` and Claude Code runs with its own login. FocusIDE does not type into the terminal. Phase 2 replaced this route with a Claude pane, see "Pane mode (Phase 2, 2026-11-13)" below.
 - The adapter starts with `--hide-claude-auth` (present in claude-agent-acp 0.106.0, `src/hide-claude-auth.ts`). It hides the claude.ai login method and refuses plan-billed sessions with `authRequired` and reason `claude_subscription_not_supported`; FocusIDE maps that reason to the same routing result.
 - Launch data updated from the ACP registry: Codex install `npm install -g @agentclientprotocol/codex-acp` (it carries its own `@openai/codex`; the command is still `codex-acp`), `gemini --acp`, `qwen --acp --experimental-skills`.
 - Phase 0 state: the installer included the `claude-agent-acp` executable, which embeds Anthropic's Claude Agent SDK. Phase 1 replaced that with a download on first use (below).
 - Phase 1 (2026-11-13): the installer no longer carries `claude-agent-acp` (`externalBin` removed from `tauri.bundle.conf.json`, the release job no longer runs `fetch-adapter.mjs`). `crates/core/src/adapter_download.rs` pins v0.106.0 and one SHA-256 per release archive (the six targets of `fetch-adapter.mjs`; the hashes match GitHub's asset digests). When a Claude session cannot start because the adapter is missing, the "Before you start" banner names the source (GitHub, agentclientprotocol/claude-agent-acp, the version) and the size (about 185 to 220 MB, the archive includes the Claude CLI), with a Download button and a percent. The app streams the archive to `<app data>/adapters/.download`, checks the hash, extracts only `claude-agent-acp[.exe]` (the Claude CLI is never written) to `<app data>/adapters/claude-agent-acp-<version>/`, removes other versions, then starts the waiting session. `locate_adapter()` checks `FOCUSIDE_ACP_ADAPTER`, then app data, then the old sidecar places, so `npm run dev` with `fetch-adapter.mjs` still works (the script now checks the same hashes). HTTP uses reqwest with rustls and ring, the same setup as the updater. `scripts/check-bundle.mjs` fails when a bundle config (externalBin or resources) or a build output folder would carry `claude`, `claude.exe` or `claude-agent-acp*`; it runs in `npm run lint`, CI, and before and after the release build. Checked on this machine: a live download of the Windows x64 archive (219 MB) installed only `claude-agent-acp.exe` (118.5 MB). `THIRD_PARTY_NOTICES.md` stays in the bundle and now says the adapter is downloaded from upstream, not redistributed. Phase 1 does not change the Commercial Terms question (docs/agent-terms.md).
 - The "Claude Code connector" string is now "Claude connector", and the picker fallback label is "Claude" (Agent SDK branding guide).
 - Not done in Phase 0: showing the adapter's own auth methods. The adapter lists terminal login methods only when the client declares terminal auth support, and running one needs a PTY that starts a program, which comes with Phase 2.
+
+### Pane mode (Phase 2, 2026-11-13)
+
+Phase 2 of [docs/agent-terms.md](docs/agent-terms.md). A session can run in pane mode: the agent's own unmodified TUI (for example `claude`) runs in a PTY, drawn with xterm.js in the center view. The user types every prompt there. FocusIDE records turns around it: snapshots, the changes card and Undo turn.
+
+| Decision | Why |
+|---|---|
+| ACP for chat mode; the agent's unmodified TUI in a PTY for pane mode. Still no stream-json and no `-p` | Replaces "ACP only, Claude Code only in v1" above. Pane mode is the path Anthropic's text describes for plan logins ("signing in to the unmodified Claude Code binary") |
+| Claude plan logins and signed-out Claude open a Claude pane (`agent::ClaudeRoute::Pane`, which replaces the Phase 0 `Terminal` route). A new `claude_route` command runs `claude auth status --json` once per app run; new Claude sessions use its answer. A chat session that is routed later shows "Open Claude pane" | Plan users go straight to the pane and never need the adapter download. API key and cloud users keep chat mode. Other agents default to chat |
+| Any installed agent with a TUI can open in a pane: palette "Open <agent> in a pane", and the new session menu (the caret next to "+") | Pane mode is not Claude only |
+| Pane sessions put the TUI in the center. The changes cards sit beside it when the center is 980 px or wider, above it otherwise. No message box, no conversation | Deviation from "the conversation is the center" (sections 1 and 5). The TUI is the conversation in this mode |
+| No new Settings row | "Settings max 6 rows". Mode comes from the login and the agent, and the new session menu picks it per session |
+| Turn boundaries without hooks: a turn starts when the pane opens and right after each Checkpoint; it ends on Checkpoint, pane exit and pane close. `TurnRecorder` (`turn_recorder.rs`) does claim, start snapshot, watch log, end snapshot, diff, record, release and prune for chat sessions and panes alike; `Pane::begin` and `Pane::end_turn` are what Phase 3 hooks will call | The agent-terms plan. Hooks are Phase 3 |
+| A pane holds the project claim while its turn is open, so while a pane runs, a chat turn in the same project gets "Another session is running here." When another session holds the claim, the pane shows "This turn is not tracked because another session was running" and Checkpoint tries again. Undo and redo with a running pane end the pane's open turn, run, then start a new one | Keeps "one running turn per project" correct without hooks. A pane never blocks undo |
+| "Includes changes from outside this session" is never set for panes (`turn_recorder::outside_changes` needs tool information) | A pane reports no tool calls, so every change would look like an outside change |
+| FocusIDE never types into a pane. `pty_write` carries only xterm.js input (keys, paste, and xterm's own answers to terminal queries). "Run in terminal" stays in the shell drawer. After Undo turn in a pane, the pane shows "You undid this turn. Claude does not know this." instead of the chat mode's prompt note | Automated driving risk (Consumer Terms section 3) |
+| Launch: the program is found with the same lookup as chat mode (`which::find`, npm shims followed, `node <script>` for scripts; `locate_claude` for Claude). The PTY adds only `TERM` and `COLORTERM`; no variable is added or removed for auth. Claude starts with no arguments. A test fails if any TUI argument is `-p`, `--print`, `--bare`, `--append-system-prompt`, `--system-prompt` or `--settings` | Forced login method and classifier risks |
+| `pty_open` takes a session key instead of a program from the UI. With a key it starts that pane's launch, resolved in Rust (`Pane::launch`); `pty::spawn` takes program, args and extra env. PTYs carry their session, and closing a pane session kills its PTY tree | The UI cannot choose what runs in an agent pane |
+| PTY exit is taken from the process (`child.wait`), then the reader gets 400 ms to drain | ConPTY keeps the output pipe open after the program exits until the pseudo console closes, so reader EOF alone missed exits |
+| A saved pane session (`SavedSession.mode = "pane"`, with a FocusIDE id `pane-<key>` in `acpId`) reopens as a fresh TUI. No resume flag is passed | Resume flags differ per agent and were not checked |
+| The plan card and the turn summary are not shown in panes. The cards column says they need hooks | They come from hook data in Phase 3 |
+| Product labels say "Claude" ("Claude pane", "Open Claude pane"). The pane note says "Claude Code runs with its own login. Billing and limits follow your Claude plan and Anthropic's terms."; other agents get a generic line | Naming rule; policy change risk |
+
+TUI commands (`AgentSpec.tui_program`, `tui_args`):
+
+| Agent | Command | Checked |
+|---|---|---|
+| Claude | `claude` | Run on this machine (Claude Code 2.1.323) |
+| Codex | `codex` | From the Codex CLI docs. Not installed here |
+| Gemini CLI | `gemini` | From the Gemini CLI docs. Not installed here |
+| OpenCode | `opencode` | From the OpenCode docs. Not installed here |
+| Qwen Code | `qwen` | Unverified (Gemini CLI fork). Not installed here |
+| Goose | `goose session` | Goose docs: "Start or resume interactive chat sessions". Not installed here |
+
+Verified on this machine (Windows 11):
+- `cargo test`: 4 new `turn_recorder` tests (record, release and undo of a turn; a continued turn updates its record and adds commands; a failed snapshot releases the claim; the outside rule with and without tool information), the PTY test (`cmd /c echo` with an extra variable through `pty::spawn`, ConPTY, output and exit), and the TUI flag test. Chat sessions use `TurnRecorder` with the same events and fields as before.
+- Live, ignored tests: `claude --version` through `pty::spawn` printed "2.1.323 (Claude Code)". The full `claude` TUI started in a PTY in an empty folder, drew its screen, and ended when the PTY closed (`cargo test -p focuside-desktop -- --ignored real_claude`). Nothing was typed into it.
+- ConPTY sends a cursor position request (`ESC [6n`) at start and the program waits for the answer. xterm.js answers it in the app; the tests answer it the same way. Pane output that arrives before `pty_open` returns is kept and replayed, so this request is not lost.
+- `npm run lint`, `svelte-check` and `vite build` pass.
+
+Not verified:
+- The app itself was not run. Not checked in the window: AgentPane drawing, Checkpoint and the changes cards, Undo turn from a pane, switching sessions while a TUI keeps running, the new session menu, and the Claude route at startup.
+- The ConPTY test list from docs/agent-terms.md: resize, alt screen, mouse and paste of large text in the Claude TUI.
+- Codex, Gemini CLI, OpenCode, Qwen Code and Goose TUIs (not installed). macOS and Linux (CI only).
+- Keys: like the shell drawer, a focused pane keeps its keys, so Mod+K and other app keys do not work while the pane has focus. Click outside the pane first.
+
+Not done in Phase 2: hooks (Phase 3: turn start on UserPromptSubmit, release on Stop and StopFailure, plan card from ExitPlanMode, summary from the last message), and showing the adapter's own auth methods in a pane. Promoting pane mode to Claude plan users still waits on Anthropic's answers to questions (1), (2) and (5) in docs/agent-terms.md.
 
 ## 11. Open items
 
