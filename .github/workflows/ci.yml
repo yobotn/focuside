@@ -49,7 +49,7 @@ jobs:
           node scripts/text-lint.mjs --commit-msg commit-msgs.txt
 
       - name: Install UI dependencies
-        run: npm --prefix apps/desktop ci
+        run: npm --prefix apps/desktop install --no-audit --no-fund
 
       - name: File icons
         run: node scripts/build-icons.mjs
