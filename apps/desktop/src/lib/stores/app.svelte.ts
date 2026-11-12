@@ -441,7 +441,7 @@ class AppStore {
   private promptError(s: Session, msg: string) {
     if (msg === "otherRunning") s.note(t("session.otherRunning"), "warn");
     else if (msg === "busy") s.note(t("conv.working"), "muted");
-    else if (msg === "signin" || msg === "claude_access") s.status = "claudeAccess";
+    else if (msg === "signin" || msg === "claude_route") s.status = "claudeAccess";
     else s.note(t("conv.error", { error: msg }), "error");
   }
 
@@ -532,12 +532,17 @@ class AppStore {
       await api.sessionResume(s.key);
     } catch (e) {
       const msg = errText(e);
-      if (msg === "claude_access" || msg === "signin") s.status = "claudeAccess";
+      if (msg === "claude_route" || msg === "signin") s.status = "claudeAccess";
       else {
         s.status = "failed";
         s.error = msg;
       }
     }
+  }
+
+  /** Opens the terminal drawer without typing anything into it. */
+  openTerminal() {
+    this.terminalVisible = true;
   }
 
   /** Opens the terminal drawer and runs a command there (install commands, claude sign-in). */

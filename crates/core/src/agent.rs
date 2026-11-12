@@ -28,6 +28,14 @@ Risk: <one short line, or none>";
 
 const ADAPTER: &str = "claude-agent-acp";
 
+/// Adapter flag: it hides the claude.ai login method from `initialize` and refuses with
+/// `authRequired` every session and turn that a Claude plan would pay for. Chat mode is built on
+/// the Claude Agent SDK, so it takes API keys and cloud providers only.
+pub const HIDE_CLAUDE_AUTH: &str = "--hide-claude-auth";
+
+/// `data.reason` of the adapter's `authRequired` error when it refused a Claude plan login.
+pub const SUBSCRIPTION_NOT_SUPPORTED: &str = "claude_subscription_not_supported";
+
 fn exe(name: &str) -> String {
     if cfg!(windows) {
         format!("{name}.exe")
@@ -78,7 +86,7 @@ pub fn claude_command() -> Result<AgentCommand, Missing> {
     let claude = locate_claude().ok_or(Missing::Claude)?;
     Ok(AgentCommand {
         adapter,
-        args: vec![],
+        args: vec![HIDE_CLAUDE_AUTH.to_string()],
         claude: Some(claude),
         env: vec![],
     })
@@ -96,9 +104,11 @@ pub struct ClaudeAuth {
     pub provider: String,
 }
 
-/// Anthropic does not allow apps built on the Claude Agent SDK (the bundled adapter is one) to
-/// use Claude subscription plans unless approved. FocusIDE starts Claude only with an API key
-/// (ANTHROPIC_API_KEY or apiKeyHelper) or a cloud provider. See
+/// Which kind of login Claude Code uses. Chat mode runs through the Claude Agent SDK (the
+/// bundled adapter), and Anthropic asks SDK apps to use API key authentication. So chat mode
+/// takes an API key (ANTHROPIC_API_KEY or apiKeyHelper) or a cloud provider. A Claude plan login
+/// is not refused: it is routed to Claude's own terminal app (see `ClaudeRoute`). FocusIDE never
+/// changes or hides a login method of the `claude` binary. See docs/agent-terms.md and
 /// https://code.claude.com/docs/en/legal-and-compliance (Authentication and credential use).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,6 +117,25 @@ pub enum ClaudeAccess {
     /// Signed in with a Claude.ai account (Free, Pro, Max, Team, Enterprise) or its OAuth token.
     Subscription,
     SignedOut,
+}
+
+/// Where FocusIDE runs Claude for a given login. Chat mode is FocusIDE's own UI over ACP.
+/// Terminal means the user runs the unmodified `claude` in the terminal drawer, with its own
+/// login. FocusIDE opens the drawer but never types into it. A later version adds a pane route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClaudeRoute {
+    Chat,
+    Terminal,
+}
+
+impl ClaudeAccess {
+    pub fn route(self) -> ClaudeRoute {
+        match self {
+            ClaudeAccess::Allowed => ClaudeRoute::Chat,
+            ClaudeAccess::Subscription | ClaudeAccess::SignedOut => ClaudeRoute::Terminal,
+        }
+    }
 }
 
 impl ClaudeAuth {
@@ -206,13 +235,13 @@ pub const AGENTS: &[AgentSpec] = &[
         name: "Codex",
         program: "codex-acp",
         args: &[],
-        install: "npm install -g @openai/codex @zed-industries/codex-acp",
+        install: "npm install -g @agentclientprotocol/codex-acp",
     },
     AgentSpec {
         id: "gemini",
         name: "Gemini CLI",
         program: "gemini",
-        args: &["--experimental-acp"],
+        args: &["--acp"],
         install: "npm install -g @google/gemini-cli",
     },
     AgentSpec {
@@ -226,7 +255,7 @@ pub const AGENTS: &[AgentSpec] = &[
         id: "qwen",
         name: "Qwen Code",
         program: "qwen",
-        args: &["--experimental-acp"],
+        args: &["--acp", "--experimental-skills"],
         install: "npm install -g @qwen-code/qwen-code",
     },
     AgentSpec {
@@ -366,8 +395,8 @@ mod tests {
     #[test]
     fn splits_command_lines() {
         assert_eq!(
-            split_command("gemini --experimental-acp"),
-            vec!["gemini", "--experimental-acp"]
+            split_command("qwen --acp --experimental-skills"),
+            vec!["qwen", "--acp", "--experimental-skills"]
         );
         assert_eq!(
             split_command(r#""C:\Program Files\x\agent.exe" acp  --flag "a b" ''"#),
@@ -396,6 +425,9 @@ mod tests {
             ClaudeAccess::Allowed
         );
         assert_eq!(a(json!({"loggedIn": false})), ClaudeAccess::SignedOut);
+        assert_eq!(ClaudeAccess::Allowed.route(), ClaudeRoute::Chat);
+        assert_eq!(ClaudeAccess::Subscription.route(), ClaudeRoute::Terminal);
+        assert_eq!(ClaudeAccess::SignedOut.route(), ClaudeRoute::Terminal);
     }
 
     /// Runs the real `claude auth status` on this machine: `cargo test -- --ignored real_claude`.

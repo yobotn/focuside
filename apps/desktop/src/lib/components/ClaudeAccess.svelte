@@ -1,7 +1,9 @@
 <script lang="ts">
-  // Shown when Claude Code is signed in with a Claude plan, or not signed in. FocusIDE starts
-  // Claude only with an API key or a cloud provider, as Anthropic requires for apps built on
-  // the Claude Agent SDK. The key stays with Claude Code: FocusIDE never reads or stores it.
+  // Shown when Claude Code is signed in with a Claude plan, or not signed in. Chat mode runs
+  // through the Claude Agent SDK, so it takes an API key or a cloud provider. A plan login is
+  // routed, not refused: the user runs the unmodified `claude` in the terminal drawer, with its
+  // own login. FocusIDE opens the drawer but never types into it (session.route, agent::ClaudeRoute).
+  // Credentials stay with Claude Code: FocusIDE never reads or stores them.
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { t } from "../i18n";
@@ -28,6 +30,15 @@
 <div class="panel" role="alert">
   <p class="mb-2 font-semibold">{t("access.title")}</p>
   <p class="mb-3">{session.access === "signedOut" ? t("access.signedOut") : t("access.subscription")}</p>
+
+  {#if session.route === "terminal"}
+    <p class="mb-1 font-medium">{t("access.planTitle")}</p>
+    <p class="mb-2">{t("access.planBody")}</p>
+    <div class="mb-2 flex items-center gap-2">
+      <button class="btn" onclick={() => app.openTerminal()}>{t("access.openTerminal")}</button>
+    </div>
+    <p class="mb-3 text-fg-muted">{t("access.planNote")}</p>
+  {/if}
 
   <p class="mb-1 font-medium">{t("access.keyTitle")}</p>
   <ol class="mb-2 list-decimal ps-5">

@@ -2,7 +2,7 @@
 
 > FocusIDE is a free, open source (GPL 3.0) desktop app for working with AI coding agents such as Claude Code, Codex and Gemini CLI. It shows a plan before any file changes, marks files the agent changes outside the plan while it works, and undoes a whole turn with one key. It runs on your machine with no server, no account and no telemetry. Windows installer today; macOS and Linux build from source.
 
-FocusIDE connects to agents over the Agent Client Protocol (ACP). The user installs and sets up the agent themselves. Claude needs an API key (ANTHROPIC_API_KEY) or a cloud provider: Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans. FocusIDE never reads, stores or proxies agent credentials. It is an independent project, not affiliated with or endorsed by Anthropic.
+FocusIDE connects to agents over the Agent Client Protocol (ACP). The user installs and sets up the agent themselves. Chat mode with Claude needs an API key (ANTHROPIC_API_KEY) or a cloud provider, because it runs through the Claude Agent SDK. Claude plan users run Claude in the terminal. A Claude pane is planned. FocusIDE never reads, stores or proxies agent credentials. It is an independent project, not affiliated with or endorsed by Anthropic.
 
 ## Docs
 

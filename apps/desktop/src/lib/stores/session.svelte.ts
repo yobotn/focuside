@@ -74,8 +74,10 @@ export class Session {
   agent = "claude";
   /** The agent has a plan mode, so "Plan first" can work. */
   planMode = $state(true);
-  /** Why Claude did not start: a subscription login, or not signed in at all. */
+  /** Why Claude did not start in chat mode: a Claude plan login, or not signed in at all. */
   access = $state<"subscription" | "signedOut" | null>(null);
+  /** Where that login can run instead (agent::ClaudeRoute). Today only the terminal drawer. */
+  route = $state<"terminal" | null>(null);
   name = $state("");
   renamed = $state(false);
   status = $state<Status>("idle");
@@ -223,13 +225,15 @@ export class Session {
         this.error = e.message;
         return "none";
       case "signin":
-        // Signing in to a Claude account is not offered (see agent::ClaudeAccess): ask for a key.
+        // Chat mode does not offer a Claude account sign-in (see agent::ClaudeRoute).
         this.status = "claudeAccess";
         this.access = "signedOut";
+        this.route = "terminal";
         return "none";
-      case "claude_access":
+      case "claude_route":
         this.status = "claudeAccess";
         this.access = e.access;
+        this.route = e.route;
         return "none";
       case "stopped":
         this.status = "stopped";

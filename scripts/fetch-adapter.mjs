@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
+// When you change the version, update THIRD_PARTY_NOTICES.md too.
 export const ADAPTER_VERSION = "0.106.0";
 
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");

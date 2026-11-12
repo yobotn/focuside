@@ -34,7 +34,7 @@ FocusIDE is a free, open source desktop app for AI coding agents. It shows a sho
 
 FocusIDE starts the agent you already use, over the open [Agent Client Protocol](https://agentclientprotocol.com). You install and set up the agent yourself. Usage is billed by its provider, to your own account.
 
-**Claude needs an API key.** Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans (Pro, Max, Team, Enterprise). FocusIDE connects to Claude Code through an Agent SDK based adapter, so it starts Claude only with an API key (`ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys)) or a cloud provider (Amazon Bedrock, Google Vertex AI, Microsoft Foundry). Claude Code reads the key; FocusIDE never reads or stores it. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
+**Chat mode with Claude needs an API key or a cloud provider.** FocusIDE's chat mode connects to Claude Code through an adapter built on the Claude Agent SDK, and Anthropic asks apps built on the SDK to use API key authentication. So chat mode starts Claude with an API key (`ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys)) or a cloud provider (Amazon Bedrock, Google Vertex AI, Microsoft Foundry). With a Claude plan (Pro, Max, Team, Enterprise), run Claude in the terminal: FocusIDE opens the terminal drawer, and the user types `claude` there. Claude Code then runs with its own login. A Claude pane in FocusIDE is planned for a later version. FocusIDE never reads or stores credentials. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
 
 ## Your code stays on your machine
 
@@ -52,7 +52,7 @@ A free, open source desktop app for working with AI coding agents. The conversat
 Yes. GPL 3.0. You pay only for your agent, under your own plan with its provider.
 
 **Which AI agents does FocusIDE work with?**
-Claude Code works with an API key or a cloud provider. Codex, Gemini CLI, OpenCode, Qwen Code and Goose work when installed. Any other ACP agent works through a custom command.
+Claude Code chat mode works with an API key or a cloud provider. With a Claude plan, run Claude in the terminal. Codex, Gemini CLI, OpenCode, Qwen Code and Goose work when installed. Any other ACP agent works through a custom command.
 
 **Does FocusIDE see my code or my credentials?**
 No. No server, no account, no telemetry. It never reads, stores or proxies agent credentials.
@@ -71,6 +71,6 @@ No. FocusIDE is an independent project, not affiliated with or endorsed by Anthr
 
 ## Get started
 
-1. Install your agent. For Claude Code: `npm install -g @anthropic-ai/claude-code`, then set `ANTHROPIC_API_KEY` from the Claude Console (or use a cloud provider).
+1. Install your agent. For Claude Code: `npm install -g @anthropic-ai/claude-code`, then set `ANTHROPIC_API_KEY` from the Claude Console (or use a cloud provider) for chat mode. With a Claude plan, run `claude` in the terminal.
 2. [Download FocusIDE](https://github.com/yobotn/focuside/releases/latest) and run the installer.
 3. Open a folder, ask for a change, and press Ctrl+Enter on the plan.

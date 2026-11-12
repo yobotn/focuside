@@ -109,6 +109,16 @@ impl Session {
         let _ = self.app.emit("session", data);
     }
 
+    /// Sends the routing result for a Claude login that chat mode does not take, and returns the
+    /// error that ends this start. The UI shows where the login can run instead.
+    fn route_claude(&self, access: agent::ClaudeAccess) -> anyhow::Error {
+        self.emit(
+            "claude_route",
+            json!({ "access": access, "route": access.route() }),
+        );
+        anyhow!("claude_route")
+    }
+
     fn conn(&self) -> Result<Connection> {
         self.conn
             .lock()
@@ -133,16 +143,17 @@ impl Session {
             return Ok(());
         }
         self.emit("starting", json!({}));
-        // Claude only with an API key or a cloud provider (Anthropic's rule for Agent SDK apps).
+        // Chat mode takes an API key or a cloud provider (Anthropic's rule for Agent SDK apps).
+        // Other logins are not refused but routed: the UI sends the user to Claude's own
+        // terminal app, which keeps every login method of the `claude` binary.
         if let Some(claude) = &self.cmd.claude {
             match agent::claude_auth(claude, &self.cmd.env).await {
-                Ok(auth) => match auth.access() {
-                    agent::ClaudeAccess::Allowed => {}
-                    access => {
-                        self.emit("claude_access", json!({ "access": access }));
-                        bail!("claude_access");
+                Ok(auth) => {
+                    let access = auth.access();
+                    if access.route() != agent::ClaudeRoute::Chat {
+                        return Err(self.route_claude(access));
                     }
-                },
+                }
                 Err(e) => tracing::warn!("claude auth status: {e:#}"),
             }
         }
@@ -219,6 +230,13 @@ impl Session {
                 let tail = p.stderr_tail();
                 p.tree.kill().await;
                 if e.is_auth_required() {
+                    // The adapter (--hide-claude-auth) refused a Claude plan login.
+                    if self.cmd.claude.is_some()
+                        && e.data.as_ref().and_then(|d| d["reason"].as_str())
+                            == Some(agent::SUBSCRIPTION_NOT_SUPPORTED)
+                    {
+                        return Err(self.route_claude(agent::ClaudeAccess::Subscription));
+                    }
                     self.emit("signin", json!({}));
                     bail!("signin");
                 }

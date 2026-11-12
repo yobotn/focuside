@@ -86,7 +86,7 @@
         {#each app.agents as a (a.id)}
           <option value={a.id}>{a.path ? a.name : t("agent.notInstalled", { name: a.name })}</option>
         {/each}
-        {#if !app.agents.length}<option value="claude">Claude Code</option>{/if}
+        {#if !app.agents.length}<option value="claude">Claude</option>{/if}
         <option value="custom">{t("agent.custom")}</option>
       </select>
 

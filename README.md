@@ -98,22 +98,24 @@ flowchart LR
 - **Git.** Undo turn keeps snapshots in a private git repo. Your project does not need to be a git repo.
 
 > [!IMPORTANT]
-> **Claude needs an API key or a cloud provider.** Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans (Pro, Max, Team, Enterprise). FocusIDE connects to Claude Code through an Agent SDK based adapter, so it starts Claude only with:
+> **Chat mode with Claude needs an API key or a cloud provider.** FocusIDE's chat mode connects to Claude Code through an adapter built on the Claude Agent SDK, and Anthropic asks apps built on the SDK to use API key authentication. So chat mode starts Claude with:
 >
 > - an API key in `ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys), or
 > - Amazon Bedrock, Google Vertex AI or Microsoft Foundry.
 >
-> Claude Code reads the key. FocusIDE never reads or stores it. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
+> **With a Claude plan (Pro, Max, Team, Enterprise), run Claude in the terminal.** FocusIDE opens the terminal drawer, and you type `claude` there. Claude Code then runs with its own login. A Claude pane in FocusIDE is planned for a later version.
+>
+> Claude Code reads the key and runs its own login. FocusIDE never reads or stores credentials. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) and [docs/agent-terms.md](docs/agent-terms.md).
 
 ## 🔌 Agents
 
 | Agent | How FocusIDE starts it | Notes |
 | :-- | :-- | :-- |
-| Claude Code | Bundled `claude-agent-acp` adapter, which runs your own `claude` | API key or cloud provider. Full plan mode. |
-| Codex | `codex-acp` | Install it yourself. |
-| Gemini CLI | `gemini --experimental-acp` | Install it yourself. |
+| Claude Code | Bundled `claude-agent-acp` adapter with `--hide-claude-auth`, which runs your own `claude` | Chat mode: API key or cloud provider. Claude plan: run `claude` in the terminal. Full plan mode. |
+| Codex | `codex-acp`, from `npm install -g @agentclientprotocol/codex-acp` | Install it yourself. |
+| Gemini CLI | `gemini --acp` | Install it yourself. |
 | OpenCode | `opencode acp` | Install it yourself. |
-| Qwen Code | `qwen --experimental-acp` | Install it yourself. |
+| Qwen Code | `qwen --acp --experimental-skills` | Install it yourself. |
 | Goose | `goose acp` | Install it yourself. |
 | Anything else | **Settings > Custom command** | Any ACP agent. `NAME=value` at the start sets environment variables. |
 
@@ -201,4 +203,6 @@ Copyright (C) 2026 yobotn.
 
 ## ™️ Trademarks
 
-FocusIDE is an independent project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic. Other agent names are trademarks of their owners. FocusIDE works with these agents. It does not include them.
+FocusIDE is an independent project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic. Other agent names are trademarks of their owners.
+
+FocusIDE does not include Claude Code or any other agent. You install the agent yourself. The installer does include one third-party program: the `claude-agent-acp` adapter executable. Its source is Apache-2.0, and the executable embeds Anthropic's Claude Agent SDK, which is under Anthropic's Commercial Terms. The Claude CLI that comes with the adapter release is removed before bundling. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

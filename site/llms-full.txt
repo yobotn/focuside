@@ -14,9 +14,9 @@
 
 FocusIDE is an IDE where the conversation with the coding agent is the center of the window. The user reads, approves and checks. The agent types. Files, diffs and a terminal are there to check the work.
 
-FocusIDE does not include a model or an agent. It starts the agent the user already installed, and talks to it over the Agent Client Protocol (ACP, https://agentclientprotocol.com). Usage is billed by the agent's provider to the user's own account.
+FocusIDE does not include a model or an agent. The installer does include the claude-agent-acp adapter executable (Apache-2.0 source; it embeds Anthropic's Claude Agent SDK). It starts the agent the user already installed, and talks to it over the Agent Client Protocol (ACP, https://agentclientprotocol.com). Usage is billed by the agent's provider to the user's own account.
 
-**Claude needs an API key.** Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans (Pro, Max, Team, Enterprise). FocusIDE connects to Claude Code through an Agent SDK based adapter, so it starts Claude only with an API key (`ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys)) or a cloud provider (Amazon Bedrock, Google Vertex AI, Microsoft Foundry). Claude Code reads the key; FocusIDE never reads or stores it. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
+**Chat mode with Claude needs an API key or a cloud provider.** FocusIDE's chat mode connects to Claude Code through an adapter built on the Claude Agent SDK, and Anthropic asks apps built on the SDK to use API key authentication. So chat mode starts Claude with an API key (`ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys)) or a cloud provider (Amazon Bedrock, Google Vertex AI, Microsoft Foundry). With a Claude plan (Pro, Max, Team, Enterprise), run Claude in the terminal: FocusIDE opens the terminal drawer, and the user types `claude` there. Claude Code then runs with its own login. A Claude pane in FocusIDE is planned for a later version. FocusIDE never reads or stores credentials. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
 
 ## Core ideas
 
@@ -55,11 +55,11 @@ Several projects stay open in a rail on the left, each with several sessions. A 
 
 | Agent | How FocusIDE starts it |
 | --- | --- |
-| Claude Code | The bundled claude-agent-acp adapter, which runs the user's own installed `claude` binary |
-| Codex | `codex-acp` |
-| Gemini CLI | `gemini --experimental-acp` |
+| Claude Code | The bundled claude-agent-acp adapter with `--hide-claude-auth`, which runs the user's own installed `claude` binary |
+| Codex | `codex-acp` (`npm install -g @agentclientprotocol/codex-acp`) |
+| Gemini CLI | `gemini --acp` |
 | OpenCode | `opencode acp` |
-| Qwen Code | `qwen --experimental-acp` |
+| Qwen Code | `qwen --acp --experimental-skills` |
 | Goose | `goose acp` |
 | Custom command | Any command line that speaks ACP over stdio. Leading NAME=value parts set environment variables |
 
@@ -68,12 +68,12 @@ Settings shows which agents are installed. The command palette offers "New sessi
 ## Requirements
 
 - Windows 10 or 11 (x64) for the installer.
-- An agent, installed and set up by the user. For Claude Code: `npm install -g @anthropic-ai/claude-code`, plus `ANTHROPIC_API_KEY` or a cloud provider (Claude plans are not supported, see above).
+- An agent, installed and set up by the user. For Claude Code: `npm install -g @anthropic-ai/claude-code`, plus `ANTHROPIC_API_KEY` or a cloud provider for chat mode. With a Claude plan, run `claude` in the terminal (see above).
 - Git on PATH. Undo turn uses it for snapshots.
 
 ## Getting started
 
-1. Install and set up your agent (for Claude: an API key or a cloud provider).
+1. Install and set up your agent (for Claude chat mode: an API key or a cloud provider).
 2. Download the installer from https://github.com/yobotn/focuside/releases/latest and run it.
 3. Open a project folder (Open folder, drag a folder onto the window, or `FocusIDE.exe <folder>` from a terminal).
 4. Type a request with Plan first on. Review the plan card.

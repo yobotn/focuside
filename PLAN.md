@@ -133,7 +133,7 @@ Gap we fill: one calm app built around reading and approving agent work, with a 
 - Permission requests show the adapter's own options. FocusIDE keeps no permission rules of its own.
 - "Run plan" answers the plan request with the adapter's "accept edits" option. Shell commands still ask.
 - FocusIDE never reads, stores or proxies credentials. It only starts the user's installed agent.
-- v2 adds Codex (`codex-acp`) and Gemini (`gemini --acp`, check the move to Antigravity CLI first).
+- v2 adds Codex (`codex-acp` from `@agentclientprotocol/codex-acp`) and Gemini (`gemini --acp`, check the move to Antigravity CLI first).
 
 ### Plan card source (no second model call)
 1. In plan mode, FocusIDE adds a short instruction to the session (how is decided in M0.5: adapter system prompt option if available): end every plan with `Steps:` (6 or fewer, plain words) and `Files:` (one line each: `create|edit|delete path - reason`).
@@ -511,9 +511,9 @@ Not done in v1, as planned or for packaging:
 
 The owner asked for three things after the first build: more agents than Claude, readable markdown files, and panels that resize and move.
 
-- **More agents (pulled forward from v2).** Settings > Default agent lists Claude Code, Codex (`codex-acp`), Gemini CLI (`gemini --experimental-acp`), OpenCode (`opencode acp`), Qwen Code (`qwen --experimental-acp`), Goose (`goose acp`) and Custom command. Each one shows "(not installed)" when it is not on PATH. The palette has "New session with <agent>" for each installed agent. A custom command can start with `NAME=value` parts, which set environment variables. Sessions remember their agent, so resume uses the same one. "Plan first" is turned off for agents that do not report a plan mode. Snapshots, undo and the changes card do not depend on the agent.
+- **More agents (pulled forward from v2).** Settings > Default agent lists Claude Code, Codex (`codex-acp`), Gemini CLI (`gemini --acp`, was `--experimental-acp` until 2026-11-12), OpenCode (`opencode acp`), Qwen Code (`qwen --acp --experimental-skills`, was `--experimental-acp`), Goose (`goose acp`) and Custom command. Each one shows "(not installed)" when it is not on PATH. The palette has "New session with <agent>" for each installed agent. A custom command can start with `NAME=value` parts, which set environment variables. Sessions remember their agent, so resume uses the same one. "Plan first" is turned off for agents that do not report a plan mode. Snapshots, undo and the changes card do not depend on the agent.
   - Checked live: the picker, a custom command (the spawn path ran and the agent's own error came back), the agent name in the bar and in errors.
-  - Not checked live: Codex, Gemini, OpenCode, Qwen and Goose themselves (none are installed on this machine). The `--experimental-acp` flags may change upstream.
+  - Not checked live: Codex, Gemini, OpenCode, Qwen and Goose themselves (none are installed on this machine). ACP flags may change upstream; the 2026-11-12 values come from the ACP registry.
 - **Markdown files.** Files render as documents: embedded HTML (sanitized), YAML front matter as a small table, task lists, GitHub alerts (`> [!NOTE]`), `<details>`, `<kbd>`, `align="center"`, heading anchors, links between .md files (open in the viewer) and images inside the project (loaded through `fs_image`, 8 MB limit). Web images are not fetched (privacy and the content policy); they show as a chip with their alt text that opens the link. Agent text still renders without raw HTML.
 - **Panels.** The file tree, viewer and terminal resize by dragging the 1 px divider (arrow keys also work; double-click resets). The file tree and viewer each move to the other side with the arrows button in their header or from the palette ("Move file tree/viewer to the other side", "Reset panel layout"). Sizes and sides are saved. The conversation keeps at least 360 px.
 - **State file safety.** A `state.json` that does not parse (a hand edit with a BOM wiped the test machine's recent list) is now kept as `state.json.bad`. The app falls back to `state.json.bak`, which every save keeps one version of.
@@ -530,17 +530,29 @@ Sources read: code.claude.com/docs/en/legal-and-compliance and code.claude.com/d
 
 ### Release setup (2026-11-12)
 
-- Decision (owner): keep Claude and follow Anthropic's rules. Before a Claude session starts, FocusIDE runs the user's own `claude auth status --json` and reads only the method and provider. A Claude plan login (or no login) does not start; the app explains how to set `ANTHROPIC_API_KEY` or a cloud provider. API key and Bedrock/Vertex/Foundry start as normal. Checked on this machine: a Max login is blocked, the same with a test key is allowed. The agent is labelled "Claude" (Agent SDK branding guide).
+- Decision (owner): keep Claude and follow Anthropic's rules. Changed on 2026-11-12: plan logins are now routed to the terminal instead of blocked, see "Agent terms (2026-11-12)" below. Before a Claude session starts, FocusIDE runs the user's own `claude auth status --json` and reads only the method and provider. A Claude plan login (or no login) does not start; the app explains how to set `ANTHROPIC_API_KEY` or a cloud provider. API key and Bedrock/Vertex/Foundry start as normal. Checked on this machine: a Max login is blocked, the same with a test key is allowed. The agent is labelled "Claude" (Agent SDK branding guide).
 - Auto-update: `tauri-plugin-updater` with signed `latest.json` from GitHub Releases. It checks 15 s after start and every 6 hours, downloads in the background, and installs only when the user picks "Restart to update". Settings has "Check for updates" and an on/off switch. The signing key is outside the repo (`~/.tauri/focuside-updater.key` with its password file) and in the repo secrets.
 - Issues: issue forms (bug, feature) and "Report a bug" / "Request a feature" in Settings and the palette, with the version and OS filled in. A failed agent start has "Report this problem".
 - Release: pushing a `v*` tag runs CI, builds the Windows installer, signs the update and drafts a GitHub Release with `latest.json`.
 - Website: `site/` deployed to GitHub Pages at https://yobotn.github.io/focuside/ (SEO, JSON-LD, llms.txt, llms-full.txt, markdown twin, AI crawler rules). focuside.dev is registered but points to the registrar's parking page. To move: point DNS to GitHub Pages, add `site/CNAME` with `focuside.dev`, set the custom domain in the repo settings, and replace `https://yobotn.github.io/focuside/` with `https://focuside.dev/` in `site/` and README.md.
+
+### Agent terms (2026-11-12)
+
+Research and plan: [docs/agent-terms.md](docs/agent-terms.md). Phase 0 of that plan is done.
+
+- Decision (owner): FocusIDE never has its own login for any agent and never reads, stores or proxies credentials. It only starts the user's installed agent, which runs its own login.
+- Claude plan logins are routed, not blocked. Blocking conflicts with the Commercial Terms clause that bars restricting "any authentication method built into" Claude Code. `Session::start` still runs `claude auth status --json`, but a plan login (or no login) now returns a routing result (`agent::ClaudeRoute`, event `claude_route`). The UI explains that chat mode needs an API key or a cloud provider, and offers "Open terminal", where the user types `claude` and Claude Code runs with its own login. FocusIDE does not type into the terminal. Phase 2 adds a `Pane` route.
+- The adapter starts with `--hide-claude-auth` (present in claude-agent-acp 0.106.0, `src/hide-claude-auth.ts`). It hides the claude.ai login method and refuses plan-billed sessions with `authRequired` and reason `claude_subscription_not_supported`; FocusIDE maps that reason to the same routing result.
+- Launch data updated from the ACP registry: Codex install `npm install -g @agentclientprotocol/codex-acp` (it carries its own `@openai/codex`; the command is still `codex-acp`), `gemini --acp`, `qwen --acp --experimental-skills`.
+- The installer includes the `claude-agent-acp` executable, which embeds Anthropic's Claude Agent SDK. README states this, and `THIRD_PARTY_NOTICES.md` (bundled as a resource) carries the Apache-2.0 text and the SDK line. Phase 1 replaces the bundle with a download on first use.
+- The "Claude Code connector" string is now "Claude connector", and the picker fallback label is "Claude" (Agent SDK branding guide).
+- Not done in Phase 0: showing the adapter's own auth methods. The adapter lists terminal login methods only when the client declares terminal auth support, and running one needs a PTY that starts a program, which comes with Phase 2.
 
 ## 11. Open items
 
 1. Owner says go to create the public repo `yobotn/focuside` and push.
 2. Set up the focuside.app redirect.
 3. Trademark search for FocusIDE.
-4. ~~Check Anthropic's policy~~ done 2026-11-12, see section 10. Decide between ways (a), (b) and (c) before the public release.
+4. ~~Check Anthropic's policy~~ done 2026-11-12, see section 10. Decide between ways (a), (b) and (c) before the public release. Update 2026-11-12: see "Agent terms (2026-11-12)" and the questions for Anthropic in docs/agent-terms.md.
 5. ~~Which agent comes second in v2~~: all known ACP agents are now selectable; check each one live once installed.
 6. Rename the local folder from `terminalScreen` to `focuside` (optional, before the first push).
