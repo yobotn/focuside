@@ -137,6 +137,8 @@ mod tests {
         assert!(find("git").is_some());
     }
 
+    /// npm shims and their backslash paths only exist on Windows.
+    #[cfg(windows)]
     #[test]
     fn follows_npm_shim() {
         let dir = tempfile::tempdir().unwrap();

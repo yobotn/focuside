@@ -1,5 +1,5 @@
 # FocusIDE website. Everyone may read it, including AI crawlers and agents.
-# A short summary for language models is at /llms.txt and the full docs at /llms-full.txt.
+# A short summary for language models is at llms.txt and the full docs at llms-full.txt (next to this file).
 
 User-agent: *
 Allow: /
