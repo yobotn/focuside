@@ -507,11 +507,22 @@ Not done in v1, as planned or for packaging:
 - The `focuside` command line shim. The app already opens folders passed as arguments (`FocusIDE.exe <folder>`) and forwards them to the running window. Adding the shim to PATH belongs to packaging (v2/v3).
 - Revert one hunk (v2).
 
+### After M3: owner feedback (2026-11-12)
+
+The owner asked for three things after the first build: more agents than Claude, readable markdown files, and panels that resize and move.
+
+- **More agents (pulled forward from v2).** Settings > Default agent lists Claude Code, Codex (`codex-acp`), Gemini CLI (`gemini --experimental-acp`), OpenCode (`opencode acp`), Qwen Code (`qwen --experimental-acp`), Goose (`goose acp`) and Custom command. Each one shows "(not installed)" when it is not on PATH. The palette has "New session with <agent>" for each installed agent. A custom command can start with `NAME=value` parts, which set environment variables. Sessions remember their agent, so resume uses the same one. "Plan first" is turned off for agents that do not report a plan mode. Snapshots, undo and the changes card do not depend on the agent.
+  - Checked live: the picker, a custom command (the spawn path ran and the agent's own error came back), the agent name in the bar and in errors.
+  - Not checked live: Codex, Gemini, OpenCode, Qwen and Goose themselves (none are installed on this machine). The `--experimental-acp` flags may change upstream.
+- **Markdown files.** Files render as documents: embedded HTML (sanitized), YAML front matter as a small table, task lists, GitHub alerts (`> [!NOTE]`), `<details>`, `<kbd>`, `align="center"`, heading anchors, links between .md files (open in the viewer) and images inside the project (loaded through `fs_image`, 8 MB limit). Web images are not fetched (privacy and the content policy); they show as a chip with their alt text that opens the link. Agent text still renders without raw HTML.
+- **Panels.** The file tree, viewer and terminal resize by dragging the 1 px divider (arrow keys also work; double-click resets). The file tree and viewer each move to the other side with the arrows button in their header or from the palette ("Move file tree/viewer to the other side", "Reset panel layout"). Sizes and sides are saved. The conversation keeps at least 360 px.
+- **State file safety.** A `state.json` that does not parse (a hand edit with a BOM wiped the test machine's recent list) is now kept as `state.json.bad`. The app falls back to `state.json.bak`, which every save keeps one version of.
+
 ## 11. Open items
 
 1. Owner says go to create the public repo `yobotn/focuside` and push.
 2. Set up the focuside.app redirect.
 3. Trademark search for FocusIDE.
 4. Check Anthropic's policy for third-party apps that start Claude Code through the Agent SDK, before public release.
-5. Which agent comes second in v2: Codex or Gemini.
+5. ~~Which agent comes second in v2~~: all known ACP agents are now selectable; check each one live once installed.
 6. Rename the local folder from `terminalScreen` to `focuside` (optional, before the first push).

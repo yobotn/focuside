@@ -8,6 +8,9 @@
 
   let shellName = $state("");
   $effect(() => {
+    app.loadAgents();
+  });
+  $effect(() => {
     invoke<string>("default_shell_name").then((s) => (shellName = s)).catch(() => {});
   });
 
@@ -59,9 +62,34 @@
       />
 
       <label for="s-agent">{t("settings.agent")}</label>
-      <select id="s-agent" value={app.settings.agent} disabled>
-        <option value="claude">Claude Code</option>
+      <select
+        id="s-agent"
+        value={app.settings.agent}
+        onchange={(e) => {
+          app.settings.agent = e.currentTarget.value;
+          app.save();
+        }}
+      >
+        {#each app.agents as a (a.id)}
+          <option value={a.id}>{a.path ? a.name : t("agent.notInstalled", { name: a.name })}</option>
+        {/each}
+        {#if !app.agents.length}<option value="claude">Claude Code</option>{/if}
+        <option value="custom">{t("agent.custom")}</option>
       </select>
+
+      {#if app.settings.agent === "custom"}
+        <label for="s-agent-cmd">{t("agent.commandLabel")}</label>
+        <input
+          id="s-agent-cmd"
+          value={app.settings.agentCommand}
+          placeholder={t("agent.commandHint")}
+          spellcheck="false"
+          onchange={(e) => {
+            app.settings.agentCommand = e.currentTarget.value.trim();
+            app.save();
+          }}
+        />
+      {/if}
 
       <label for="s-ignored">{t("settings.ignored")}</label>
       <input

@@ -2,7 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { openPath } from "@tauri-apps/plugin-opener";
-  import { ArrowCounterClockwise, CaretLeft, CaretRight, X } from "phosphor-svelte";
+  import { ArrowCounterClockwise, ArrowsLeftRight, CaretLeft, CaretRight, X } from "phosphor-svelte";
   import { api, errText } from "../api";
   import { formatSize } from "../editor";
   import { t } from "../i18n";
@@ -179,6 +179,14 @@
     {#if v.kind === "file" && dirty}
       <button class="btn h-6" onclick={save} title={keyLabel("Mod+S")}>{t("common.save")}</button>
     {/if}
+    <button
+      class="icon-btn"
+      onclick={() => app.movePanel("viewer")}
+      title={app.layout.viewerSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
+      aria-label={app.layout.viewerSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
+    >
+      <ArrowsLeftRight size={13} />
+    </button>
     <button class="icon-btn" onclick={close} title="{t('viewer.close')} (Esc)" aria-label={t("viewer.close")}><X size={14} /></button>
   </header>
 
@@ -218,7 +226,9 @@
         </button>
       </div>
     {:else if isMd && !source}
-      <div class="md"><Markdown text={text} /></div>
+      <div class="md">
+        <Markdown {text} doc={{ projectId: project.id, path, open: (p) => (app.viewer = { kind: "file", projectId: project.id, path: p }) }} />
+      </div>
     {:else}
       <CodeEditor {path} {text} onchange={(t2) => (text = t2)} onsave={save} />
     {/if}
@@ -228,12 +238,10 @@
 
 <style>
   .viewer {
-    width: min(46%, 820px);
-    min-width: 320px;
-    flex-shrink: 0;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    border-inline-start: 1px solid var(--border);
     background: var(--bg);
     min-height: 0;
     outline: none;
@@ -273,6 +281,8 @@
   }
   .md {
     padding: 20px 28px 40px;
-    max-width: 760px;
+    max-width: 860px;
+    width: 100%;
+    margin: 0 auto;
   }
 </style>

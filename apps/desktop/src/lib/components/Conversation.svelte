@@ -130,9 +130,9 @@
         <button class="btn" onclick={() => app.resumeAgent(session)}>{t("session.stoppedResume")}</button>
       </div>
     {:else if session.status === "failed"}
-      <p class="text-danger selectable">{t("session.failedStart", { error: session.error ?? "" })}</p>
+      <p class="text-danger selectable">{t("session.failedStart", { agent: app.agentName(session.agent), error: session.error ?? "" })}</p>
     {:else if session.status === "starting" && !session.entries.length}
-      <p class="text-center text-fg-muted">{t("session.starting")}</p>
+      <p class="text-center text-fg-muted">{t("session.starting", { agent: app.agentName(session.agent) })}</p>
     {/if}
   </div>
 </div>

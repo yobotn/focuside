@@ -3,6 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { FileVersions, ProjectInfo, UndoOutcome, UndoPreview } from "./types";
 
+export interface AgentInfo {
+  id: string;
+  name: string;
+  path: string | null;
+  install: string;
+}
+
 export interface EnvCheck {
   claude: string | null;
   git: string | null;
@@ -20,8 +27,9 @@ export const api = {
   projectOpen: (path: string) => invoke<ProjectInfo>("project_open", { path }),
   projectClose: (id: string) => invoke<void>("project_close", { id }),
 
-  sessionStart: (projectId: string, resume: string | null) =>
-    invoke<string>("session_start", { projectId, resume }),
+  agentList: () => invoke<AgentInfo[]>("agent_list"),
+  sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string) =>
+    invoke<string>("session_start", { projectId, resume, agentId, customCommand }),
   sessionPrompt: (key: string, blocks: unknown[], planFirst: boolean, continueTurn: string | null = null) =>
     invoke<string>("session_prompt", { key, blocks, planFirst, continueTurn }),
   sessionAnswer: (key: string, requestId: string, optionId: string) =>

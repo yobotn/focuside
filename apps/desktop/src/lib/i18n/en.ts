@@ -48,10 +48,10 @@ export const en = {
   "session.listEmpty": "No sessions in this project yet.",
   "session.resume": "Resume",
   "session.renameHint": "Double click to rename",
-  "session.starting": "Starting Claude Code",
+  "session.starting": "Starting {agent}",
   "session.stopped": "Agent stopped.",
   "session.stoppedResume": "Resume",
-  "session.failedStart": "Claude Code did not start: {error}",
+  "session.failedStart": "{agent} did not start: {error}",
   "session.otherRunning": "Another session is running here.",
 
   // Waiting queue
@@ -177,6 +177,21 @@ export const en = {
 
   // Files
   "files.title": "Files",
+  "agent.custom": "Custom command",
+  "agent.missing": "{name} is not installed. Install it, then try again: {install}",
+  "agent.customMissing": "The custom agent command was not found. Check it in Settings.",
+  "agent.notInstalled": "{name} (not installed)",
+  "agent.commandLabel": "Agent command",
+  "agent.commandHint": "An ACP agent, for example: my-agent --acp",
+  "agent.noPlanMode": "This agent has no plan mode. Prompts run directly.",
+  "cmd.newSessionWith": "New session with {name}",
+  "layout.resize": "Resize panel",
+  "layout.resizeHint": "Drag to resize. Double-click to reset.",
+  "layout.moveLeft": "Move to the left",
+  "layout.moveRight": "Move to the right",
+  "cmd.moveFiles": "Move file tree to the other side",
+  "cmd.moveViewer": "Move viewer to the other side",
+  "cmd.resetLayout": "Reset panel layout",
   "files.empty": "This folder is empty.",
   "files.error": "Could not read this folder: {error}",
 

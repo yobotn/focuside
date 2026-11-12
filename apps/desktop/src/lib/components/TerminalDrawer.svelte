@@ -20,7 +20,6 @@
   let exited = $state(false);
   let unlisten: UnlistenFn[] = [];
   let ro: ResizeObserver | null = null;
-  let height = $state(260);
 
   function colors() {
     const css = getComputedStyle(document.documentElement);
@@ -119,22 +118,9 @@
     term?.dispose();
   });
 
-  function drag(e: PointerEvent) {
-    const startY = e.clientY;
-    const startH = height;
-    const move = (ev: PointerEvent) => (height = Math.max(120, Math.min(window.innerHeight * 0.75, startH + startY - ev.clientY)));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  }
 </script>
 
-<section class="drawer" style="height: {height}px">
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="grip" onpointerdown={drag}></div>
+<section class="drawer" style="height: {app.layout.terminalHeight}px">
   <header class="head">
     <span class="font-medium">{t("term.title")}</span>
     <span class="kbd">{keyLabel("Mod+`")}</span>
@@ -152,17 +138,7 @@
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    border-top: 1px solid var(--border);
     background: var(--bg-sunken);
-  }
-  .grip {
-    position: absolute;
-    top: -3px;
-    left: 0;
-    right: 0;
-    height: 6px;
-    cursor: ns-resize;
-    z-index: 2;
   }
   .head {
     display: flex;

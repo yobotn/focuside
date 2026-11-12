@@ -180,8 +180,8 @@
       aria-label={t("box.placeholder")}
     ></textarea>
     <div class="bar">
-      <label class="toggle" title={t("box.planFirstHint")}>
-        <input type="checkbox" checked={app.planFirst} onchange={(e) => app.setPlanFirst(e.currentTarget.checked)} />
+      <label class="toggle" class:off={!session.planMode} title={session.planMode ? t("box.planFirstHint") : t("agent.noPlanMode")}>
+        <input type="checkbox" checked={app.planFirst && session.planMode} disabled={!session.planMode} onchange={(e) => app.setPlanFirst(e.currentTarget.checked)} />
         <span class="switch" aria-hidden="true"></span>
         {t("box.planFirst")}
       </label>
@@ -209,6 +209,9 @@
 </div>
 
 <style>
+  .toggle.off {
+    opacity: 0.5;
+  }
   .wrap {
     max-width: 760px;
     width: 100%;

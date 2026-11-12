@@ -62,6 +62,8 @@ export interface SavedSession {
   renamed: boolean;
   created: number;
   updated: number;
+  /** Agent id ("claude", "codex", ...). Missing in sessions saved before agents could be chosen. */
+  agent?: string;
 }
 
 export class Session {
@@ -69,6 +71,9 @@ export class Session {
   projectId: string;
   root: string;
   acpId = $state<string | null>(null);
+  agent = "claude";
+  /** The agent has a plan mode, so "Plan first" can work. */
+  planMode = $state(true);
   name = $state("");
   renamed = $state(false);
   status = $state<Status>("idle");
@@ -105,6 +110,7 @@ export class Session {
       this.renamed = saved.renamed;
       this.created = saved.created;
       this.updated = saved.updated;
+      this.agent = saved.agent ?? "claude";
     }
   }
 
@@ -147,6 +153,7 @@ export class Session {
       renamed: this.renamed,
       created: this.created,
       updated: this.updated,
+      agent: this.agent,
     };
   }
 
@@ -201,6 +208,12 @@ export class Session {
         this.status = "ready";
         this.acpId = e.acpId;
         this.images = !!e.caps?.images;
+        {
+          const modes: { id: string }[] = e.modes?.availableModes ?? [];
+          const modeOpt = (e.configOptions ?? []).find((o: any) => o.id === "mode" || o.category === "mode");
+          const values: string[] = (modeOpt?.options ?? []).map((o: any) => o.value);
+          this.planMode = modes.some((m) => m.id === "plan") || values.includes("plan");
+        }
         if (Array.isArray(e.configOptions)) this.configOptions = e.configOptions;
         return "none";
       case "failed":

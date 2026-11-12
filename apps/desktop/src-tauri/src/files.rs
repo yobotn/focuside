@@ -137,3 +137,38 @@ pub fn watch(app: AppHandle, project: &Arc<Project>) {
         Err(e) => tracing::warn!("watcher: {e}"),
     }
 }
+
+/// A project image as a data URL, for images in rendered markdown. Only common image types
+/// up to 8 MB; the path must stay inside the project.
+#[tauri::command]
+pub async fn fs_image(state: State<'_, AppState>, project_id: String, path: String) -> Res<String> {
+    use base64::Engine;
+    let p = project(&state, &project_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let full = files::resolve(&p.root, &path).map_err(|e| format!("{e:#}"))?;
+        let ext = full
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let mime = match ext.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            "avif" => "image/avif",
+            "bmp" => "image/bmp",
+            "ico" => "image/x-icon",
+            _ => return Err("Not an image.".to_string()),
+        };
+        let meta = std::fs::metadata(&full).map_err(|e| e.to_string())?;
+        if meta.len() > 8 * 1024 * 1024 {
+            return Err("Image is too large.".to_string());
+        }
+        let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+        Ok(format!("data:{mime};base64,{b64}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

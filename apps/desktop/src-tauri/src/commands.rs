@@ -54,18 +54,42 @@ pub fn env_check(state: State<'_, AppState>) -> Value {
     })
 }
 
+/// The ACP agents FocusIDE knows and whether each is installed.
+#[tauri::command]
+pub async fn agent_list() -> Vec<agent::AgentInfo> {
+    tauri::async_runtime::spawn_blocking(agent::agents)
+        .await
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn startup_paths(state: State<'_, AppState>) -> Vec<String> {
     std::mem::take(&mut *state.startup_paths.lock().unwrap())
 }
 
 /// The UI keeps its own state (recent projects, session names, settings) as one JSON file.
+/// A file that does not parse (for example after a hand edit) is kept as state.json.bad, and
+/// the previous good state is tried from state.json.bak, so the next save never wipes it.
 #[tauri::command]
 pub fn ui_state_load(state: State<'_, AppState>) -> Value {
-    std::fs::read(state.config_dir.join("state.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or(Value::Null)
+    let path = state.config_dir.join("state.json");
+    let parse = |p: &std::path::Path| -> Option<Value> {
+        let b = std::fs::read(p).ok()?;
+        let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&b);
+        serde_json::from_slice(b).ok()
+    };
+    if let Some(v) = parse(&path) {
+        return v;
+    }
+    if path.is_file() {
+        let bad = state.config_dir.join("state.json.bad");
+        let _ = std::fs::copy(&path, &bad);
+        tracing::warn!(
+            "state.json does not parse; kept a copy at {}",
+            bad.display()
+        );
+    }
+    parse(&state.config_dir.join("state.json.bak")).unwrap_or(Value::Null)
 }
 
 #[tauri::command]
@@ -73,6 +97,10 @@ pub fn ui_state_save(state: State<'_, AppState>, value: Value) -> Res<()> {
     let path = state.config_dir.join("state.json");
     let tmp = state.config_dir.join("state.json.tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(&value).map_err(err)?).map_err(err)?;
+    // One previous version stays as state.json.bak.
+    if path.is_file() {
+        let _ = std::fs::copy(&path, state.config_dir.join("state.json.bak"));
+    }
     std::fs::rename(&tmp, &path).map_err(err)
 }
 
@@ -138,11 +166,18 @@ pub async fn session_start(
     state: State<'_, AppState>,
     project_id: String,
     resume: Option<String>,
+    agent_id: Option<String>,
+    custom_command: Option<String>,
 ) -> Res<String> {
     let p = project(&state, &project_id)?;
-    let cmd = agent::claude_command().map_err(|m| match m {
+    let cmd = agent::agent_command(
+        agent_id.as_deref().unwrap_or("claude"),
+        custom_command.as_deref(),
+    )
+    .map_err(|m| match m {
         agent::Missing::Claude => "missing:claude".to_string(),
         agent::Missing::Adapter => "missing:adapter".to_string(),
+        agent::Missing::Agent => "missing:agent".to_string(),
     })?;
     let s = Session::new(app, p, cmd);
     state

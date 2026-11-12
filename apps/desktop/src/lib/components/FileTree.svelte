@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { CaretDown, CaretRight, PushPin } from "phosphor-svelte";
+  import { ArrowsLeftRight, CaretDown, CaretRight, PushPin } from "phosphor-svelte";
   import { t } from "../i18n";
   import { invalidate } from "../files.svelte";
   import { app, type Project } from "../stores/app.svelte";
@@ -116,7 +116,17 @@
 </script>
 
 <aside class="files">
-  <div class="head">{t("files.title")}</div>
+  <div class="head">
+    <span class="flex-1">{t("files.title")}</span>
+    <button
+      class="icon-btn move"
+      onclick={() => app.movePanel("files")}
+      title={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
+      aria-label={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
+    >
+      <ArrowsLeftRight size={12} />
+    </button>
+  </div>
   {#if pinned}
     <button class="row pinned" class:on={viewing === pinned.path} onclick={() => open(pinned)}>
       <PushPin size={12} class="shrink-0 text-fg-faint" />
@@ -159,12 +169,18 @@
 </aside>
 
 <style>
+  .move {
+    opacity: 0;
+  }
+  .files:hover .move,
+  .move:focus-visible {
+    opacity: 1;
+  }
   .files {
-    width: 248px;
-    flex-shrink: 0;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    border-inline-end: 1px solid var(--border);
     background: var(--bg-subtle);
     min-height: 0;
   }
@@ -172,7 +188,7 @@
     height: 40px;
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    padding: 0 6px 0 12px;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.06em;

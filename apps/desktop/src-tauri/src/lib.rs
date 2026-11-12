@@ -91,6 +91,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::debug_log,
             commands::env_check,
+            commands::agent_list,
             commands::startup_paths,
             commands::ui_state_load,
             commands::ui_state_save,
@@ -117,6 +118,7 @@ pub fn run() {
             files::fs_read,
             files::fs_write,
             files::fs_search,
+            files::fs_image,
             pty::pty_open,
             pty::pty_write,
             pty::pty_resize,

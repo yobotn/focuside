@@ -4,7 +4,7 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { api, errText, onOpenPaths, onSessionEvent, type EnvCheck, type SessionEvent } from "../api";
+import { api, errText, onOpenPaths, onSessionEvent, type AgentInfo, type EnvCheck, type SessionEvent } from "../api";
 import { t } from "../i18n";
 import type { Entry, ProjectInfo, UndoOutcome, Waiting } from "../types";
 import { Session, type SavedSession } from "./session.svelte";
@@ -15,9 +15,24 @@ export interface Settings {
   fontSize: number;
   shell: string;
   agent: string;
+  /** The command line for the "custom" agent. */
+  agentCommand: string;
   showIgnored: boolean;
   notifications: boolean;
 }
+
+export type Side = "left" | "right";
+
+/** Panel sizes and sides. Widths in pixels. */
+export interface Layout {
+  filesWidth: number;
+  viewerWidth: number;
+  terminalHeight: number;
+  filesSide: Side;
+  viewerSide: Side;
+}
+
+export const defaultLayout: Layout = { filesWidth: 248, viewerWidth: 640, terminalHeight: 260, filesSide: "left", viewerSide: "right" };
 
 interface Persisted {
   recent: { path: string; name: string; opened: number }[];
@@ -28,6 +43,7 @@ interface Persisted {
   history: string[];
   settings: Settings;
   filesVisible: boolean;
+  layout: Layout;
 }
 
 const defaults: Persisted = {
@@ -37,8 +53,9 @@ const defaults: Persisted = {
   sessions: {},
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", showIgnored: false, notifications: true },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", showIgnored: false, notifications: true },
   filesVisible: true,
+  layout: { ...defaultLayout },
 };
 
 export interface Project extends ProjectInfo {
@@ -60,6 +77,7 @@ class AppStore {
   savedSessions = $state<Record<string, SavedSession[]>>({});
   settings = $state<Settings>({ ...defaults.settings });
   filesVisible = $state(true);
+  layout = $state<Layout>({ ...defaultLayout });
   terminalVisible = $state(false);
   terminalCommand = $state<string | null>(null);
   focused = $state(true);
@@ -115,9 +133,11 @@ class AppStore {
       this.savedSessions = st.sessions;
       this.settings = st.settings;
       this.filesVisible = st.filesVisible;
+      this.layout = { ...defaultLayout, ...(raw?.layout ?? {}) };
       applyTheme(this.settings.theme);
       document.documentElement.style.setProperty("--read-size", `${this.settings.fontSize}px`);
       this.env = await api.envCheck();
+      this.loadAgents();
       await onSessionEvent((e) => this.onEvent(e));
       await onOpenPaths((paths) => paths.forEach((p) => this.openPath(p)));
       const w = getCurrentWindow();
@@ -141,6 +161,18 @@ class AppStore {
       this.flash(errText(e), "error");
     }
     this.ready = true;
+  }
+
+  /** Moves a panel to the other side of the conversation. */
+  movePanel(panel: "files" | "viewer") {
+    const key = panel === "files" ? "filesSide" : "viewerSide";
+    this.layout[key] = this.layout[key] === "left" ? "right" : "left";
+    this.save();
+  }
+
+  resetLayout() {
+    this.layout = { ...defaultLayout };
+    this.save();
   }
 
   flash(text: string, tone: "muted" | "error" = "muted") {
@@ -177,6 +209,7 @@ class AppStore {
       history: this.history.slice(-200),
       settings: $state.snapshot(this.settings),
       filesVisible: this.filesVisible,
+      layout: $state.snapshot(this.layout),
     };
     api.uiStateSave(st).catch(() => {});
   }
@@ -240,7 +273,20 @@ class AppStore {
 
   // Sessions
 
-  async newSession(resume?: SavedSession) {
+  /** Known agents and whether each is installed. Loaded for Settings and the palette. */
+  agents = $state<AgentInfo[]>([]);
+
+  async loadAgents() {
+    this.agents = await api.agentList().catch(() => []);
+  }
+
+  agentName(id: string): string {
+    if (id === "custom") return t("agent.custom");
+    if (id === "claude") return "Claude Code";
+    return this.agents.find((a) => a.id === id)?.name ?? id;
+  }
+
+  async newSession(resume?: SavedSession, agentId?: string) {
     const p = this.active;
     if (!p) return;
     if (resume) {
@@ -251,8 +297,10 @@ class AppStore {
       }
     }
     try {
-      const key = await api.sessionStart(p.id, resume?.acpId ?? null);
+      const agent = resume?.agent ?? agentId ?? this.settings.agent;
+      const key = await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
       const s = new Session(key, p.id, p.root, resume);
+      s.agent = agent;
       s.status = "starting";
       s.replaying = !!resume;
       this.sessionsByKey.set(key, s);
@@ -262,7 +310,15 @@ class AppStore {
       this.updateTitle();
     } catch (e) {
       const msg = errText(e);
-      if (msg.startsWith("missing:")) this.env = await api.envCheck();
+      if (msg === "missing:agent") {
+        const id = resume?.agent ?? agentId ?? this.settings.agent;
+        if (!this.agents.length) await this.loadAgents();
+        const info = this.agents.find((a) => a.id === id);
+        this.flash(
+          id === "custom" ? t("agent.customMissing") : t("agent.missing", { name: this.agentName(id), install: info?.install ?? "" }),
+          "error",
+        );
+      } else if (msg.startsWith("missing:")) this.env = await api.envCheck();
       else this.flash(msg, "error");
     }
   }
@@ -371,7 +427,7 @@ class AppStore {
     const images = extra.filter((b: any) => b.type === "image").length;
     s.addUser(trimmed, images, files);
     try {
-      await api.sessionPrompt(s.key, blocks, this.planFirst);
+      await api.sessionPrompt(s.key, blocks, this.planFirst && s.planMode);
     } catch (e) {
       this.promptError(s, errText(e));
     }

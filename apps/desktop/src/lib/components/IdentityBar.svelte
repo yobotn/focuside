@@ -77,7 +77,7 @@
     <span class="flex-1"></span>
 
     {#if s}
-      <span class="item agent">Claude Code</span>
+      <span class="item agent">{app.agentName(s.agent)}</span>
       {#if model}
         <button class="item link agent" onclick={() => (app.overlay = "model")} title={t("bar.model")}>{modelName}</button>
       {/if}

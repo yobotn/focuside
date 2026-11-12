@@ -427,3 +427,112 @@ button {
 .doc input[type="checkbox"] {
   margin-inline-end: 6px;
 }
+.doc h5,
+.doc h6 {
+  font-size: 0.95em;
+  font-weight: 600;
+  margin: 1em 0 0.4em;
+}
+.doc h6 {
+  color: var(--fg-muted);
+}
+.doc.document h1,
+.doc.document h2 {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+.doc li.task {
+  list-style: none;
+  margin-inline-start: -1.3em;
+}
+.doc li > p {
+  margin-bottom: 0.3em;
+}
+.doc input[type="checkbox"] {
+  vertical-align: -1px;
+  accent-color: var(--fg-muted);
+}
+.doc [align="center"] {
+  text-align: center;
+}
+.doc [align="right"] {
+  text-align: end;
+}
+.doc p[align] img,
+.doc a > img {
+  display: inline-block;
+}
+.doc img {
+  height: auto;
+  border-radius: 4px;
+}
+.doc details {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin: 0 0 0.75em;
+}
+.doc summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.doc details[open] > summary {
+  margin-bottom: 0.5em;
+}
+.doc kbd {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  padding: 0.05em 0.4em;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+}
+.doc .img-remote {
+  display: inline-block;
+  font-size: 0.82em;
+  padding: 0 0.5em;
+  margin: 0 0.2em 0.2em 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+.doc .img-remote::before {
+  content: "\25A3  ";
+  color: var(--fg-faint);
+}
+.doc blockquote.alert {
+  color: inherit;
+  border-inline-start-color: var(--alert, var(--border-strong));
+}
+.doc .alert-title {
+  display: block;
+  font-weight: 600;
+  color: var(--alert, inherit);
+  margin-bottom: 0.2em;
+}
+.doc .alert-note {
+  --alert: #3b82f6;
+}
+.doc .alert-tip {
+  --alert: var(--accent);
+}
+.doc .alert-important {
+  --alert: #8b5cf6;
+}
+.doc .alert-warning {
+  --alert: var(--warn);
+}
+.doc .alert-caution {
+  --alert: var(--danger);
+}
+.doc table.front-matter {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+  margin-bottom: 1.2em;
+}
+.doc table.front-matter th {
+  background: none;
+  font-weight: 500;
+}

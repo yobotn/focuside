@@ -19,6 +19,8 @@
   import SearchPanel from "./lib/components/SearchPanel.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import TerminalDrawer from "./lib/components/TerminalDrawer.svelte";
+  import Splitter from "./lib/components/Splitter.svelte";
+  import { defaultLayout, type Side } from "./lib/stores/app.svelte";
 
   let conversation: Conversation | undefined = $state();
   let messageBox: MessageBox | undefined = $state();
@@ -43,6 +45,9 @@
   const projectColor = $derived(project ? `hsl(${project.hue} var(--project-s) var(--project-l))` : "var(--fg-faint)");
 
   // Overlays that need data.
+  $effect(() => {
+    if (app.overlay === "palette" && !app.agents.length) app.loadAgents();
+  });
   $effect(() => {
     if (app.overlay === "openFile" && project) allFiles(project.id, true).then((f) => (files = f));
   });
@@ -111,6 +116,9 @@
       { id: "files", label: t("cmd.files"), hint: keyLabel("Mod+B"), run: () => toggleFiles() },
       { id: "term", label: t("cmd.terminal"), hint: keyLabel("Mod+`"), run: () => (app.terminalVisible = !app.terminalVisible) },
       { id: "plan", label: t("cmd.planFirst"), run: () => app.setPlanFirst(!app.planFirst) },
+      { id: "moveFiles", label: t("cmd.moveFiles"), run: () => app.movePanel("files") },
+      { id: "moveViewer", label: t("cmd.moveViewer"), run: () => app.movePanel("viewer") },
+      { id: "resetLayout", label: t("cmd.resetLayout"), run: () => app.resetLayout() },
       { id: "settings", label: t("cmd.settings"), run: () => (app.overlay = "settings") },
       {
         id: "theme",
@@ -123,6 +131,10 @@
         },
       },
     ];
+    for (const a of app.agents) {
+      if (a.path && a.id !== app.settings.agent)
+        items.push({ id: `new-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), run: () => app.newSession(undefined, a.id) });
+    }
     if (s?.running) items.unshift({ id: "stop", label: t("cmd.stop"), hint: keyLabel("Mod+."), run: () => app.stop(s) });
     const lastDone = s?.entries.findLast((e) => (e.t === "changes" || (e.t === "plan" && ["done", "paused", "failed"].includes(e.state))) && !e.undo);
     if (s && lastDone && (lastDone.t === "changes" || lastDone.t === "plan"))
@@ -140,6 +152,31 @@
       run: () => project && (app.viewer = { kind: "file", projectId: project.id, path: f }),
     })),
   );
+
+  // Panels by side. Two panels on one side: the file tree sits on the outside.
+  type Panel = "files" | "viewer";
+  let winW = $state(window.innerWidth);
+  const showViewer = $derived(!!(project && app.viewer && app.viewer.projectId === project.id));
+  const panelsOn = (side: Side): Panel[] => {
+    const out: Panel[] = [];
+    if (app.filesVisible && app.layout.filesSide === side) out.push("files");
+    if (showViewer && app.layout.viewerSide === side) out.push("viewer");
+    return side === "left" ? out : out.reverse();
+  };
+  const leftPanels = $derived(panelsOn("left"));
+  const rightPanels = $derived(panelsOn("right"));
+
+  // The conversation keeps at least 360px; a panel takes what is left, within its own limits.
+  const maxWidth = (panel: Panel) => () => {
+    const other = panel === "files" ? (showViewer ? app.layout.viewerWidth : 0) : app.filesVisible ? app.layout.filesWidth : 0;
+    return Math.max(panel === "files" ? 160 : 320, winW - 48 - 360 - other);
+  };
+  const widthKey = (panel: Panel) => (panel === "files" ? "filesWidth" : "viewerWidth") as "filesWidth" | "viewerWidth";
+
+  function resize(panel: Panel, v: number, done: boolean) {
+    app.layout[widthKey(panel)] = v;
+    if (done) app.save();
+  }
 
   function toggleFiles() {
     app.filesVisible = !app.filesVisible;
@@ -178,7 +215,7 @@
   }
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} bind:innerWidth={winW} />
 
 <div class="app" class:mac={isMac} style="--project: {projectColor}">
   {#if app.projects.length}
@@ -197,9 +234,18 @@
       </div>
     </div>
   {:else}
-    {#if app.filesVisible}
-      <FileTree {project} />
-    {/if}
+    {#snippet panel(p: Panel, edge: "left" | "right")}
+      {#if edge === "left"}
+        <Splitter edge="left" value={app.layout[widthKey(p)]} min={p === "files" ? 160 : 320} max={maxWidth(p)} onchange={(v, d) => resize(p, v, d)} onreset={() => resize(p, defaultLayout[widthKey(p)], true)} />
+      {/if}
+      <div class="panel" style="width: {Math.min(app.layout[widthKey(p)], maxWidth(p)())}px">
+        {#if p === "files"}<FileTree {project} />{:else}<Viewer {project} />{/if}
+      </div>
+      {#if edge === "right"}
+        <Splitter edge="right" value={app.layout[widthKey(p)]} min={p === "files" ? 160 : 320} max={maxWidth(p)} onchange={(v, d) => resize(p, v, d)} onreset={() => resize(p, defaultLayout[widthKey(p)], true)} />
+      {/if}
+    {/snippet}
+    {#each leftPanels as p (p)}{@render panel(p, "right")}{/each}
     <main class="center">
       <IdentityBar />
       {#if session}
@@ -212,12 +258,24 @@
         <div class="flex-1"></div>
       {/if}
       {#if app.terminalVisible}
+        <Splitter
+          edge="top"
+          value={app.layout.terminalHeight}
+          min={120}
+          max={() => window.innerHeight * 0.8}
+          onchange={(v, d) => {
+            app.layout.terminalHeight = v;
+            if (d) app.save();
+          }}
+          onreset={() => {
+            app.layout.terminalHeight = defaultLayout.terminalHeight;
+            app.save();
+          }}
+        />
         {#key project.id}<TerminalDrawer {project} />{/key}
       {/if}
     </main>
-    {#if app.viewer && app.viewer.projectId === project.id}
-      <Viewer {project} />
-    {/if}
+    {#each rightPanels as p (p)}{@render panel(p, "left")}{/each}
   {/if}
 </div>
 
@@ -256,6 +314,13 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
+  }
+  .panel {
+    flex-shrink: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
   .toast {
     position: fixed;
