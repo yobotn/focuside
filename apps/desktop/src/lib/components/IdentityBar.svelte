@@ -9,6 +9,7 @@
   let editing = $state(false);
   let draft = $state("");
   let input: HTMLInputElement | undefined = $state();
+  let width = $state(1000);
 
   const context = $derived(s?.usage && s.usage.size ? Math.round((s.usage.used / s.usage.size) * 100) : null);
   const model = $derived(s?.model);
@@ -27,7 +28,7 @@
 </script>
 
 {#if p}
-  <header class="bar">
+  <header class="bar" class:narrow={width < 640} bind:clientWidth={width}>
     <span class="project" style="color: hsl({p.hue} var(--project-s) var(--project-l))">{p.name}</span>
     {#if p.branch}
       <span class="item"><GitBranch size={13} />{p.branch}</span>
@@ -96,7 +97,6 @@
 
 <style>
   .bar {
-    container-type: inline-size;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -113,10 +113,8 @@
   .session {
     min-width: 48px;
   }
-  @container (max-width: 720px) {
-    .agent {
-      display: none;
-    }
+  .narrow .agent {
+    display: none;
   }
   .item {
     display: inline-flex;

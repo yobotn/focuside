@@ -158,25 +158,20 @@ impl ShadowRepo {
         if !out.ok {
             bail!("git init failed: {}", out.stderr);
         }
-        let mut settings = vec![
-            ("core.autocrlf", "false"),
-            ("core.filemode", "false"),
-            ("core.longpaths", "true"),
-            ("core.quotepath", "false"),
-            ("core.fsmonitor", "false"),
-            ("core.untrackedCache", "true"),
-            ("core.precomposeunicode", "true"),
-            ("gc.auto", "0"),
-            ("advice.addEmbeddedRepo", "false"),
-            ("advice.detachedHead", "false"),
-            ("commit.gpgsign", "false"),
-        ];
+        // One file write instead of a git call per setting (process starts are slow on Windows).
+        let mut config = std::fs::read_to_string(self.git_dir.join("config")).unwrap_or_default();
+        config.push_str(
+            "[core]\n\tautocrlf = false\n\tfilemode = false\n\tlongpaths = true\n\tquotepath = false\n\
+             \tfsmonitor = false\n\tuntrackedCache = true\n\tprecomposeunicode = true\n",
+        );
         if cfg!(windows) {
-            settings.push(("core.symlinks", "false"));
+            config.push_str("\tsymlinks = false\n");
         }
-        for (k, v) in settings {
-            self.git(&["config", k, v]).await?;
-        }
+        config.push_str(
+            "[gc]\n\tauto = 0\n[advice]\n\taddEmbeddedRepo = false\n\tdetachedHead = false\n\
+             [commit]\n\tgpgsign = false\n",
+        );
+        std::fs::write(self.git_dir.join("config"), config)?;
         let info = self.git_dir.join("info");
         std::fs::create_dir_all(&info)?;
         // Project attributes (LFS, eol, filters) must never run on snapshots.

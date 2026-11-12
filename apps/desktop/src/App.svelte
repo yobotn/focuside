@@ -87,7 +87,7 @@
       id: o.value,
       label: o.name,
       detail: o.description ?? "",
-      hint: o.value === session?.model?.currentValue ? "current" : "",
+      hint: o.value === session?.model?.currentValue ? t("model.current") : "",
       run: async () => {
         if (!session) return;
         try {

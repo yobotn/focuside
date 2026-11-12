@@ -120,7 +120,11 @@ class AppStore {
         this.focused = payload;
         if (payload) this.clearSeen();
       });
-      for (const path of st.open) await this.openPath(path, { activate: false, quiet: true });
+      // Reopen the last projects in parallel, keeping their rail order.
+      const opened = await Promise.all(st.open.map((path) => api.projectOpen(path).catch(() => null)));
+      for (const info of opened) {
+        if (info && !this.projects.some((p) => p.id === info.id)) this.projects.push({ ...info, sessions: [], activeKey: null });
+      }
       const startup = await api.startupPaths();
       for (const p of startup) await this.openPath(p);
       if (!startup.length && st.active) {

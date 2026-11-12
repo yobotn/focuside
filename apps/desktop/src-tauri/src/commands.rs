@@ -99,7 +99,9 @@ pub async fn project_open(
         .await
         .map_err(|e| format!("{e:#}"))?;
     state.projects.lock().unwrap().insert(id, p.clone());
-    crate::files::watch(app, &p);
+    // Watching a big tree takes a moment; never hold up opening the project.
+    let watched = p.clone();
+    tokio::task::spawn_blocking(move || crate::files::watch(app, &watched));
     // Snapshot when the project opens, in the background, so the first turn is fast.
     let repo = p.shadow.clone();
     tokio::spawn(async move {

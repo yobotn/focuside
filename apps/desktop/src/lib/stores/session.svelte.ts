@@ -139,7 +139,8 @@ export class Session {
   }
 
   saved(): SavedSession | null {
-    if (!this.acpId) return null;
+    // Sessions nobody used are not worth listing.
+    if (!this.acpId || !this.name) return null;
     return {
       acpId: this.acpId,
       name: this.name,

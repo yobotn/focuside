@@ -256,6 +256,7 @@ export const en = {
   // Models
   "model.title": "Model",
   "model.none": "This agent does not offer a model choice.",
+  "model.current": "current",
 } as const satisfies Record<string, string | PluralForms>;
 
 export type Catalog = { [K in keyof typeof en]: (typeof en)[K] extends string ? string : PluralForms };

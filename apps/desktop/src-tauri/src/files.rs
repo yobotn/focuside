@@ -3,8 +3,8 @@
 use crate::project::Project;
 use crate::AppState;
 use focuside_core::files::{self, DirEntry, FileContent, SearchResult};
-use notify_debouncer_full::notify::{EventKind, RecursiveMode};
-use notify_debouncer_full::{new_debouncer, DebounceEventResult};
+use notify_debouncer_mini::notify::RecursiveMode;
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult};
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -101,24 +101,18 @@ pub fn watch(app: AppHandle, project: &Arc<Project>) {
     let weak = Arc::downgrade(project);
     let debouncer = new_debouncer(
         Duration::from_millis(250),
-        None,
         move |res: DebounceEventResult| {
             let Ok(events) = res else { return };
             let mut paths = BTreeSet::new();
             for ev in events {
-                if matches!(ev.kind, EventKind::Access(_)) {
+                let Ok(rel) = ev.path.strip_prefix(&root) else {
+                    continue;
+                };
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                if rel.is_empty() || rel == ".git" || rel.starts_with(".git/") {
                     continue;
                 }
-                for p in &ev.paths {
-                    let Ok(rel) = p.strip_prefix(&root) else {
-                        continue;
-                    };
-                    let rel = rel.to_string_lossy().replace('\\', "/");
-                    if rel.is_empty() || rel == ".git" || rel.starts_with(".git/") {
-                        continue;
-                    }
-                    paths.insert(rel);
-                }
+                paths.insert(rel);
             }
             if paths.is_empty() {
                 return;
@@ -133,7 +127,7 @@ pub fn watch(app: AppHandle, project: &Arc<Project>) {
     );
     match debouncer {
         Ok(mut d) => {
-            if let Err(e) = d.watch(&project.root, RecursiveMode::Recursive) {
+            if let Err(e) = d.watcher().watch(&project.root, RecursiveMode::Recursive) {
                 tracing::warn!("watch {}: {e}", project.root.display());
             }
             *project.watcher.lock().unwrap() = Some(Box::new(d));
