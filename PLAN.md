@@ -534,7 +534,7 @@ Sources read: code.claude.com/docs/en/legal-and-compliance and code.claude.com/d
 - Auto-update: `tauri-plugin-updater` with signed `latest.json` from GitHub Releases. It checks 15 s after start and every 6 hours, downloads in the background, and installs only when the user picks "Restart to update". Settings has "Check for updates" and an on/off switch. The signing key is outside the repo (`~/.tauri/focuside-updater.key` with its password file) and in the repo secrets.
 - Issues: issue forms (bug, feature) and "Report a bug" / "Request a feature" in Settings and the palette, with the version and OS filled in. A failed agent start has "Report this problem".
 - Release: pushing a `v*` tag runs CI, builds the Windows installer, signs the update and drafts a GitHub Release with `latest.json`.
-- Website: `site/` deployed to GitHub Pages (SEO, JSON-LD, llms.txt, llms-full.txt, markdown twin, AI crawler rules). Custom domain focuside.dev waits for DNS.
+- Website: `site/` deployed to GitHub Pages at https://yobotn.github.io/focuside/ (SEO, JSON-LD, llms.txt, llms-full.txt, markdown twin, AI crawler rules). focuside.dev is registered but points to the registrar's parking page. To move: point DNS to GitHub Pages, add `site/CNAME` with `focuside.dev`, set the custom domain in the repo settings, and replace `https://yobotn.github.io/focuside/` with `https://focuside.dev/` in `site/` and README.md.
 
 ## 11. Open items
 

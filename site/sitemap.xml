@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
-    <loc>https://focuside.dev/</loc>
+    <loc>https://yobotn.github.io/focuside/</loc>
     <lastmod>2026-11-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://focuside.dev/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yobotn.github.io/focuside/"/>
   </url>
   <url>
-    <loc>https://focuside.dev/index.md</loc>
+    <loc>https://yobotn.github.io/focuside/index.md</loc>
     <lastmod>2026-11-12</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://focuside.dev/llms.txt</loc>
+    <loc>https://yobotn.github.io/focuside/llms.txt</loc>
     <lastmod>2026-11-12</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://focuside.dev/llms-full.txt</loc>
+    <loc>https://yobotn.github.io/focuside/llms-full.txt</loc>
     <lastmod>2026-11-12</lastmod>
     <priority>0.5</priority>
   </url>

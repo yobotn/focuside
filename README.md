@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://github.com/yobotn/focuside/releases/latest"><b>Download for Windows</b></a>
   &nbsp;·&nbsp;
-  <a href="https://focuside.dev">Website</a>
+  <a href="https://yobotn.github.io/focuside/">Website</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/yobotn/focuside/issues/new/choose">Report a bug</a>
 </p>

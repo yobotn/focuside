@@ -6,8 +6,8 @@ FocusIDE connects to agents over the Agent Client Protocol (ACP). The user insta
 
 ## Docs
 
-- [Full documentation in one file](https://focuside.dev/llms-full.txt): features, shortcuts, how it works, install, FAQ
-- [Home page as Markdown](https://focuside.dev/index.md): the landing page content
+- [Full documentation in one file](https://yobotn.github.io/focuside/llms-full.txt): features, shortcuts, how it works, install, FAQ
+- [Home page as Markdown](https://yobotn.github.io/focuside/index.md): the landing page content
 - [README](https://github.com/yobotn/focuside/blob/main/README.md): overview, download, build from source
 - [AGENTS.md](https://github.com/yobotn/focuside/blob/main/AGENTS.md): how coding agents should build, test and lint the repo
 

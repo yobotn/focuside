@@ -2,7 +2,7 @@
 
 > FocusIDE is a free, open source (Apache 2.0) desktop app for working with AI coding agents such as Claude Code, Codex and Gemini CLI. It shows a plan before any file changes, marks files the agent changes outside the plan while it works, and undoes a whole turn with one key. It runs on your machine with no server, no account and no telemetry.
 
-- Website: https://focuside.dev/
+- Website: https://yobotn.github.io/focuside/
 - Source: https://github.com/yobotn/focuside
 - Download: https://github.com/yobotn/focuside/releases/latest
 - License: Apache 2.0
@@ -160,8 +160,8 @@ No. It is an independent project, not affiliated with or endorsed by Anthropic. 
 
 ## Links
 
-- Home: https://focuside.dev/
-- Short summary for language models: https://focuside.dev/llms.txt
+- Home: https://yobotn.github.io/focuside/
+- Short summary for language models: https://yobotn.github.io/focuside/llms.txt
 - Repository: https://github.com/yobotn/focuside
 - Releases: https://github.com/yobotn/focuside/releases
 - Issues: https://github.com/yobotn/focuside/issues/new/choose
