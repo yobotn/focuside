@@ -441,6 +441,7 @@ Build the signature slice first. It is what makes FocusIDE worth using.
 | One window with a project rail | Simpler than one window per project, still always shows where you are |
 | Conversation in the center, files left, viewer on demand | With agents you read and approve more than you type |
 | ACP only, Claude Code only in v1 | Same path as Zed. stream-json has known plan approval bugs |
+| Own ACP client on serde_json instead of the SDK crate | Small client surface, no churn from SDK major versions (decided in M0.5) |
 | Agent spike before UI, signature slice before files | Riskiest unknown first, most valuable part first |
 | Short plan from a fixed format and a parser, no second model call | No extra cost, delay or billing, no extra session files |
 | Scope guard live during the run | Turns plan vs actual from a report into a guard. The shareable moment |
@@ -454,7 +455,25 @@ Build the signature slice first. It is what makes FocusIDE worth using.
 | Apache 2.0, public repo | Same as Keeprun: patent grant, fits a support-based business model |
 | Always know where you are is a core requirement | Owner's long-standing pain with Claude Code in terminals |
 
-Spike results: none yet.
+### Spike results (M0.5, 2026-11-12, claude-agent-acp 0.106.0, Claude Code 2.1.322, Windows 11)
+
+| Step | Result |
+|---|---|
+| ACP client | Written directly on `serde_json` (JSON-RPC, one message per line), not the `agent-client-protocol` crate. The crate is at 5.x now and its API moves between majors. The client side is about 300 lines in `crates/core/src/acp.rs` |
+| Adapter | Release binary `claude-agent-acp-windows-x64.zip` (113 MB exe). `scripts/fetch-adapter.mjs` puts it in `src-tauri/binaries` as a Tauri sidecar. `CLAUDE_CODE_EXECUTABLE` points it to the user's `claude.exe` (`~/.local/bin`). npm `.cmd` shims are followed to the real program |
+| initialize | Under 2 s. Capabilities: loadSession, image, sessionCapabilities list, resume, close, fork, systemPrompt (append and override), title, status. `authMethods` empty when signed in |
+| Sign-in | `auth/status` request and `auth/status_update` notifications give `state: authenticated` |
+| Plan instruction | Solved: `session/new` takes `systemPrompt: {mode: "append", content: [text]}`. Nothing is written to the user's repo. Claude followed the `Steps:` / `Files:` / `Risk:` format on every test and the parser read it |
+| Plan request | Arrives as `session/request_permission` with `toolCall.kind = "switch_mode"`, title "Approve Plan", plan text in `toolCall.rawInput.plan`. Options: `exit-plan-default`, `exit-plan-clear-auto`, `exit-plan-auto`, `exit-plan-bypass`, `reject`. There is no accept-edits option when `auto` mode exists |
+| Run plan | Answer `exit-plan-default`, wait for `current_mode_update` (default), then `session/set_mode acceptEdits`. Setting the mode before that update loses a race and edits still ask. With the wait, edits went through and shell commands kept their normal rule |
+| Discard | Answer `reject`, then `session/cancel`. Prompt ends with `stopReason: cancelled` |
+| Cancel | Works, but the agent waits for a running shell command: cancel after 12 s of `ping -n 40` ended at 34 s. Stop and Pause kill the tree after 3 s, as planned |
+| Resume | `session/resume` with the old session id keeps the full history |
+| Kill | The Job Object held 10 processes (adapter, claude, shells). All gone after `TerminateJobObject` |
+| Tool locations | `tool_call` has `kind` (read, edit, delete, move, execute, search, switch_mode, other). Paths come later in `tool_call_update.locations` as absolute paths, without `kind`, so kind is tracked by `toolCallId`. Titles are short ("Read src\greet.js", "Edit package.json", the shell command) |
+| Writes outside the project | Plan mode writes the plan to `~/.claude/plans/*.md`. The scope guard ignores paths outside the project root |
+| Other updates | `session_info_update.title` (a session name from the agent), `usage_update` (`used`/`size` for context, `cost`), `config_option_update` with `mode`, `model`, `effort`. Model is changed with `session/set_config_option` (`configId: "model"`). `available_commands_update` lists slash commands and skills |
+| Default mode | Follows the user's Claude Code setting (here `auto`). FocusIDE switches to `plan` for Plan first and to `acceptEdits` after Run plan, and restores the session's original mode for prompts without Plan first |
 
 ---
 
