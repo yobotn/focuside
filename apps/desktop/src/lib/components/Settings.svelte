@@ -3,7 +3,7 @@
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { api, type HooksInfo } from "../api";
   import { t } from "../i18n";
-  import { app } from "../stores/app.svelte";
+  import { agentNote, app } from "../stores/app.svelte";
   import { applyTheme, type Theme } from "../theme.svelte";
   import { reportIssue, updates } from "../updates.svelte";
 
@@ -102,6 +102,9 @@
         {#if !app.agents.length}<option value="claude">Claude</option>{/if}
         <option value="custom">{t("agent.custom")}</option>
       </select>
+      {#if agentNote(app.settings.agent)}
+        <p class="note text-fg-muted">{agentNote(app.settings.agent)}</p>
+      {/if}
 
       {#if app.settings.agent === "custom"}
         <label for="s-agent-cmd">{t("agent.commandLabel")}</label>
@@ -257,6 +260,10 @@
     border-radius: 10px;
     box-shadow: var(--shadow);
     padding: 18px 20px 16px;
+  }
+  .note {
+    grid-column: 1 / -1;
+    margin-top: -4px;
   }
   .rows {
     display: grid;

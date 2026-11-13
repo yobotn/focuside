@@ -3,7 +3,7 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { t } from "./lib/i18n";
   import { isMac, keyLabel, mod } from "./lib/platform";
-  import { app } from "./lib/stores/app.svelte";
+  import { agentNote, app } from "./lib/stores/app.svelte";
   import { applyTheme } from "./lib/theme.svelte";
   import { allFiles } from "./lib/files.svelte";
   import Conversation from "./lib/components/Conversation.svelte";
@@ -15,6 +15,7 @@
   import Rail from "./lib/components/Rail.svelte";
   import UndoDialog from "./lib/components/UndoDialog.svelte";
   import HooksConsent from "./lib/components/HooksConsent.svelte";
+  import ChatConsent from "./lib/components/ChatConsent.svelte";
   import FileTree from "./lib/components/FileTree.svelte";
   import Viewer from "./lib/components/Viewer.svelte";
   import SearchPanel from "./lib/components/SearchPanel.svelte";
@@ -58,7 +59,7 @@
     const items: ListItem[] = [];
     for (const a of app.agents) {
       if (!a.path) continue;
-      items.push({ id: `chat-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), run: () => app.newSession(undefined, a.id, "chat") });
+      items.push({ id: `chat-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), detail: agentNote(a.id) || undefined, run: () => app.newSession(undefined, a.id, "chat") });
       if (a.tui) items.push({ id: `pane-${a.id}`, label: t("cmd.openPane", { name: a.name }), run: () => app.newSession(undefined, a.id, "pane") });
     }
     if (app.settings.agent === "custom")
@@ -160,7 +161,7 @@
     ];
     for (const a of app.agents) {
       if (a.path && a.id !== app.settings.agent)
-        items.push({ id: `new-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), run: () => app.newSession(undefined, a.id, "chat") });
+        items.push({ id: `new-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), detail: agentNote(a.id) || undefined, run: () => app.newSession(undefined, a.id, "chat") });
       if (a.path && a.tui)
         items.push({ id: `pane-${a.id}`, label: t("cmd.openPane", { name: a.name }), run: () => app.newSession(undefined, a.id, "pane") });
     }
@@ -340,6 +341,10 @@
 
 {#if app.hooksAsk}
   <HooksConsent onanswer={(yes) => app.hooksAsk?.(yes)} />
+{/if}
+
+{#if app.chatAsk}
+  <ChatConsent name={app.agentName(app.chatAsk.agent)} onanswer={(choice) => app.chatAsk?.answer(choice)} />
 {/if}
 
 {#if app.toast}

@@ -15,7 +15,8 @@ import {
   type EnvCheck,
   type SessionEvent,
 } from "../api";
-import { t } from "../i18n";
+import { t, type Key } from "../i18n";
+import { en } from "../i18n/en";
 import type { Entry, ProjectInfo, UndoOutcome, Waiting } from "../types";
 import { Session, type SavedSession, type SessionMode } from "./session.svelte";
 import { paneTerms } from "./paneterm.svelte";
@@ -35,6 +36,23 @@ export interface Settings {
   notifications: boolean;
   /** The user's answer to "add an observe-only plugin to Claude panes". Null: not asked yet. */
   claudeHooks: boolean | null;
+  /** Agent ids whose chat mode the user confirmed once after a terms note (see CHAT_CONFIRM). */
+  chatConfirmed: string[];
+}
+
+/** Agents that open in a pane by default and ask once before chat mode. Antigravity: Google's
+ * terms on third-party clients are unclear for consumer logins, and FocusIDE cannot read which
+ * login the user has (docs/agent-terms.md, Phase 4). */
+export const CHAT_CONFIRM = new Set(["antigravity"]);
+
+/** Agents that only run the provider the user set up in them; they share one terms line. */
+const PROVIDER_AGENTS = new Set(["opencode", "goose", "qwen", "cline", "kimi", "vibe"]);
+
+/** The one-line data and terms note for an agent, or "" when there is none. */
+export function agentNote(id: string): string {
+  if (PROVIDER_AGENTS.has(id)) return t("agentNote.provider");
+  const key = `agentNote.${id}`;
+  return key in en ? t(key as Key) : "";
 }
 
 export type Side = "left" | "right";
@@ -69,7 +87,7 @@ const defaults: Persisted = {
   sessions: {},
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: null },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: null, chatConfirmed: [] },
   filesVisible: true,
   layout: { ...defaultLayout },
 };
@@ -108,6 +126,8 @@ class AppStore {
   toast = $state<{ text: string; tone: "muted" | "error" } | null>(null);
   /** Set while the plugin question for Claude panes is shown; called with the answer. */
   hooksAsk = $state<((yes: boolean) => void) | null>(null);
+  /** Set while the terms note before chat mode is shown (CHAT_CONFIRM); called with the choice. */
+  chatAsk = $state<{ agent: string; answer: (choice: "chat" | "pane" | null) => void } | null>(null);
   /** Undo dialog target. */
   undoTarget = $state<{ projectId: string; turnId: string; entryId: string; sessionKey: string } | null>(null);
   /** Last undo, for "Redo last undo" in the palette. */
@@ -387,7 +407,14 @@ class AppStore {
     }
     try {
       const agent = resume?.agent ?? agentId ?? this.settings.agent;
-      const m: SessionMode = resume ? (resume.mode ?? "chat") : (mode ?? (agent === "claude" ? await this.claudeMode() : "chat"));
+      let m: SessionMode = resume
+        ? (resume.mode ?? "chat")
+        : (mode ?? (agent === "claude" ? await this.claudeMode() : CHAT_CONFIRM.has(agent) ? "pane" : "chat"));
+      if (m === "chat" && CHAT_CONFIRM.has(agent) && !this.settings.chatConfirmed.includes(agent)) {
+        const choice = await this.confirmChat(agent);
+        if (!choice) return;
+        m = choice;
+      }
       if (this.active !== p) return;
       const hooks = m === "pane" && agent === "claude" ? await this.claudeHooks() : false;
       if (this.active !== p) return;
@@ -426,6 +453,23 @@ class AppStore {
       }
       else this.flash(msg, "error");
     }
+  }
+
+  /** Asks once before chat mode with an agent in CHAT_CONFIRM. Null: the user cancelled. */
+  private confirmChat(agent: string): Promise<"chat" | "pane" | null> {
+    return new Promise((resolve) => {
+      this.chatAsk = {
+        agent,
+        answer: (choice) => {
+          this.chatAsk = null;
+          if (choice === "chat") {
+            this.settings.chatConfirmed = [...this.settings.chatConfirmed, agent];
+            this.save();
+          }
+          resolve(choice);
+        },
+      };
+    });
   }
 
   /** The plugin answer for a new Claude pane. Asks once; Settings can change it later. */

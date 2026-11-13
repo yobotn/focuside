@@ -10,7 +10,7 @@ const catalog = readFileSync(join(src, "lib/i18n/en.ts"), "utf8");
 const keys = new Set([...catalog.matchAll(/^\s*"([\w.]+)":/gm)].map((m) => m[1]));
 
 // Keys built at run time, for example `plan.change.${kind}`.
-const dynamicPrefixes = ["plan.change.", "settings.theme.", "queue.", "notify.", "tool."];
+const dynamicPrefixes = ["plan.change.", "settings.theme.", "queue.", "notify.", "tool.", "agentNote."];
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
