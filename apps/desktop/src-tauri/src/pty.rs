@@ -387,17 +387,45 @@ mod tests {
     #[ignore]
     fn real_claude_tui_starts_and_closes() {
         let tui = focuside_core::agent::tui_command("claude").expect("claude installed");
-        let out = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let out2 = out.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
         let dir = tempfile::tempdir().unwrap();
-        let pty = spawn(
-            &Launch {
+        tui_starts_and_closes(
+            Launch {
                 program: tui.program.to_string_lossy().to_string(),
                 args: tui.args.clone(),
                 env: vec![],
             },
             dir.path(),
+        );
+    }
+
+    /// The same with the launch of a Claude pane after the plugin question was answered yes:
+    /// `--plugin-dir` with the generated plugin and `FOCUSIDE_EVENTS`. Needs the built helper
+    /// (`node scripts/build-hook.mjs`):
+    /// `cargo test -p focuside-desktop -- --ignored real_claude_tui_with_plugin`.
+    #[test]
+    #[ignore]
+    fn real_claude_tui_with_plugin() {
+        let tui = focuside_core::agent::tui_command("claude").expect("claude installed");
+        let data = tempfile::tempdir().unwrap();
+        let helper = crate::hooks::helper_path().expect("focuside-hook built");
+        let plugin = crate::hooks::ensure_plugin(data.path(), &helper).unwrap();
+        let events = data.path().join("events");
+        std::fs::create_dir_all(&events).unwrap();
+        let launch = crate::pane::launch_for(tui, &events, Some(&plugin));
+        assert!(launch.args.contains(&"--plugin-dir".to_string()));
+        let dir = tempfile::tempdir().unwrap();
+        tui_starts_and_closes(launch, dir.path());
+        // No prompt was typed, so no hook ran.
+        assert!(crate::pane::take_events(&events).is_empty());
+    }
+
+    fn tui_starts_and_closes(launch: Launch, cwd: &std::path::Path) {
+        let out = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let out2 = out.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let pty = spawn(
+            &launch,
+            cwd,
             120,
             40,
             Some("s1".into()),

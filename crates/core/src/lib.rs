@@ -8,4 +8,5 @@ pub mod plan;
 pub mod proc;
 pub mod project;
 pub mod snapshot;
+pub mod summary;
 pub mod which;

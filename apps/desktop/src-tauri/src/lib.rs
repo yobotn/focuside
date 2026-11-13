@@ -2,6 +2,7 @@
 
 mod commands;
 mod files;
+mod hooks;
 mod pane;
 mod project;
 mod pty;
@@ -120,6 +121,7 @@ pub fn run() {
             commands::session_list,
             commands::session_checkpoint,
             commands::claude_route,
+            commands::hooks_info,
             commands::turn_undo_preview,
             commands::turn_undo,
             commands::turn_redo,

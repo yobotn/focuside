@@ -700,6 +700,8 @@ impl Session {
                     your_edits: &turn.your_edits,
                     continued: turn.continued,
                     tools_known: true,
+                    plan_steps: &[],
+                    last_message: None,
                 })
                 .await;
             match res {
@@ -824,7 +826,7 @@ fn config_value(options: &Value, id: &str) -> Option<String> {
 }
 
 /// Relative path when `path` is inside `root`.
-fn inside(root: &Path, path: &str) -> Option<String> {
+pub(crate) fn inside(root: &Path, path: &str) -> Option<String> {
     let p = Path::new(path);
     let lower = |s: &str| {
         if cfg!(any(windows, target_os = "macos")) {

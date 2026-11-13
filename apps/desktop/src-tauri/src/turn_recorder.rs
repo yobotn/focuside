@@ -3,13 +3,14 @@
 //! A turn is: claim the project, take a start snapshot and open the watch log, let the agent
 //! work, then take an end snapshot, diff, record the turn, release the claim and prune old
 //! snapshots. The recorder does not know where turn boundaries come from. Chat sessions use
-//! the ACP prompt and its response. Panes use the Checkpoint button and pane exit today; hook
-//! events (UserPromptSubmit, Stop, StopFailure) can call the same `start` and `finish` later.
+//! the ACP prompt and its response. Panes use hook events (UserPromptSubmit, Stop,
+//! StopFailure) when hooks run, and the Checkpoint button and pane exit otherwise.
 
 use crate::project::Project;
 use crate::turns::{now, TurnRecord};
 use anyhow::{anyhow, Result};
 use focuside_core::snapshot::{Changes, NotCovered, Snapshot};
+use focuside_core::summary::{self, TurnSummary};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,6 +41,10 @@ pub struct TurnEnd<'a> {
     /// The session reports the agent's edits and commands (ACP tool calls). A pane does not,
     /// so it cannot tell its own writes from writes made by something else.
     pub tools_known: bool,
+    /// Plan steps for the summary (panes with hooks: the plan from ExitPlanMode).
+    pub plan_steps: &'a [String],
+    /// The agent's last message for the summary (panes with hooks: the Stop hook).
+    pub last_message: Option<&'a str>,
 }
 
 /// What the end of a turn found on disk.
@@ -52,6 +57,7 @@ pub struct Recorded {
     pub outside: bool,
     pub your_edits: BTreeSet<String>,
     pub ignored: Vec<String>,
+    pub summary: TurnSummary,
 }
 
 impl Recorded {
@@ -63,6 +69,7 @@ impl Recorded {
         data["outside"] = json!(self.outside);
         data["yourEdits"] = json!(self.your_edits);
         data["ignoredChanged"] = json!(self.ignored);
+        data["summary"] = json!(self.summary);
     }
 }
 
@@ -245,6 +252,7 @@ impl TurnRecorder {
             outside,
             your_edits: end.your_edits.clone(),
             ignored,
+            summary: TurnSummary::default(),
         };
         {
             let mut turns = self.project.turns.lock().unwrap();
@@ -255,6 +263,7 @@ impl TurnRecorder {
                 .map(|t| t.commands.clone())
                 .unwrap_or_default();
         }
+        r.summary = summary::build(&r.changes, &r.commands, end.plan_steps, end.last_message);
         self.project.save_turns();
         Ok(r)
     }
@@ -342,6 +351,8 @@ mod tests {
                 your_edits: &none,
                 continued: false,
                 tools_known: false,
+                plan_steps: &[],
+                last_message: None,
             })
             .await
             .unwrap();
@@ -388,6 +399,8 @@ mod tests {
                 your_edits: &none,
                 continued: false,
                 tools_known: true,
+                plan_steps: &[],
+                last_message: None,
             })
             .await
             .unwrap();
@@ -407,6 +420,8 @@ mod tests {
                 your_edits: &none,
                 continued: true,
                 tools_known: true,
+                plan_steps: &[],
+                last_message: None,
             })
             .await
             .unwrap();

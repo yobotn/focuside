@@ -224,8 +224,10 @@ pub async fn project_close(state: State<'_, AppState>, id: String) -> Res<()> {
 /// Creates a session and starts its agent in the background. Progress arrives as events.
 /// `mode` "pane" creates a pane session instead: the agent's own TUI, which the UI starts with
 /// `pty_open` and this session key. A pane always starts a fresh TUI; `resume` is not passed
-/// to the agent.
+/// to the agent. `hooks` is the user's answer to the plugin question: only with true does a
+/// Claude pane get `--plugin-dir` with the generated focuside plugin.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn session_start(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -234,11 +236,18 @@ pub async fn session_start(
     agent_id: Option<String>,
     custom_command: Option<String>,
     mode: Option<String>,
+    hooks: Option<bool>,
 ) -> Res<String> {
     let p = project(&state, &project_id)?;
     if mode.as_deref() == Some("pane") {
-        let tui = agent::tui_command(agent_id.as_deref().unwrap_or("claude")).map_err(missing)?;
-        let pane = Pane::new(app, p, tui);
+        let agent_id = agent_id.as_deref().unwrap_or("claude");
+        let tui = agent::tui_command(agent_id).map_err(missing)?;
+        let plugin = if agent_id == "claude" && hooks == Some(true) {
+            claude_plugin(&state.data_dir)
+        } else {
+            None
+        };
+        let pane = Pane::new(app, p, agent_id, tui, plugin);
         let key = pane.key.clone();
         state.panes.lock().unwrap().insert(key.clone(), pane);
         return Ok(key);
@@ -366,6 +375,31 @@ async fn close_pane(state: &AppState, p: &Arc<Pane>) {
     crate::pty::close_session(state, &p.key);
 }
 
+/// Writes the focuside plugin folder for this OS. None (and a warning) when the helper is
+/// missing or the folder cannot be written; the pane then runs without hooks.
+fn claude_plugin(data_dir: &std::path::Path) -> Option<PathBuf> {
+    let Some(helper) = crate::hooks::helper_path() else {
+        tracing::warn!("focuside-hook not found next to the app; Claude pane runs without hooks");
+        return None;
+    };
+    crate::hooks::ensure_plugin(data_dir, &helper)
+        .map_err(|e| tracing::warn!("focuside plugin: {e:#}"))
+        .ok()
+}
+
+/// What Settings shows about hooks: whether the helper is there, and the Codex and Gemini CLI
+/// snippets for this OS with the helper's path. FocusIDE never writes those files itself.
+#[tauri::command]
+pub fn hooks_info() -> Value {
+    let helper = crate::hooks::helper_path().map(crate::dunce);
+    let windows = cfg!(windows);
+    json!({
+        "helper": helper,
+        "codex": helper.as_deref().map(|h| crate::hooks::codex_snippet(h, windows)),
+        "gemini": helper.as_deref().map(|h| crate::hooks::gemini_snippet(h, windows)),
+    })
+}
+
 /// Checkpoint in a pane: ends the open turn (changes card, undo) and starts the next one.
 #[tauri::command]
 pub async fn session_checkpoint(state: State<'_, AppState>, key: String) -> Res<()> {
@@ -426,19 +460,23 @@ fn session_of_turn(state: &AppState, project_id: &str, turn_id: &str) -> Option<
     state.sessions.lock().unwrap().get(&key).cloned()
 }
 
-/// Undo and redo need the project free. A chat turn must finish first. A pane holds the claim
-/// for as long as its TUI runs, so its open turn is ended here (as with Checkpoint) and the
-/// caller starts the next one after the undo. Returns that pane.
+/// Undo and redo need the project free. A chat turn must finish first, and so must a pane
+/// turn started by a hook (a prompt that runs). A pane turn started by hand (no hooks) is
+/// ended here, as with Checkpoint, and the caller starts the next one after the undo. Returns
+/// that pane.
 async fn open_pane_turn(state: &AppState, p: &Project) -> Res<Option<Arc<Pane>>> {
     let Some(key) = p.running_session() else {
         return Ok(None);
     };
     let pane = state.panes.lock().unwrap().get(&key).cloned();
     match pane {
-        Some(pane) => {
-            pane.end_turn("undo").await;
-            Ok(Some(pane))
-        }
+        Some(pane) => match pane.end_for_undo().await {
+            Ok(true) => Ok(Some(pane)),
+            Ok(false) => Ok(None),
+            Err(()) => {
+                Err("Wait for the running turn to finish. In a pane, Checkpoint ends it.".into())
+            }
+        },
         None => Err("Wait for the running turn to finish.".into()),
     }
 }
