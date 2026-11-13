@@ -109,8 +109,7 @@ export interface TurnResult {
   yourEdits?: string[];
   snapshotError?: string;
   summary?: TurnSummary;
-  /** Panes: where the turn came from ("hook" or "manual") and why it ended. */
-  source?: "hook" | "manual";
+  /** Panes: why the turn ended (stop, stopFailure, prompt, exit, close). */
   reason?: string;
   /** Panes: StopFailure error type ("" when unknown). Null for a normal end. */
   failure?: string | null;

@@ -45,11 +45,21 @@ export const api = {
 
   agentList: () => invoke<AgentInfo[]>("agent_list"),
   adapterDownload: () => invoke<string>("adapter_download"),
-  /** `hooks`: turn tracking in Claude panes (the focuside plugin). `planFirst`: a Claude pane starts in plan mode. */
-  sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string, mode: "chat" | "pane" = "chat", hooks = false, planFirst = false) =>
-    invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode, hooks, planFirst }),
+  /** `hooks`: turn tracking in Claude panes (the focuside plugin). `planFirst`: a Claude pane starts in plan mode.
+   * `brief`: the plugin copy with the brief replies output style (needs `hooks`). */
+  sessionStart: (
+    projectId: string,
+    resume: string | null,
+    agentId: string,
+    customCommand: string,
+    mode: "chat" | "pane" = "chat",
+    hooks = false,
+    planFirst = false,
+    brief = false,
+  ) => invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode, hooks, planFirst, brief }),
   hooksInfo: () => invoke<HooksInfo>("hooks_info"),
-  sessionCheckpoint: (key: string) => invoke<void>("session_checkpoint", { key }),
+  /** Sends one Shift+Tab key sequence to a Claude pane (its mode button). Rejects with "busy" while a prompt runs. */
+  paneModeKey: (key: string) => invoke<void>("pane_mode_key", { key }),
   claudeRoute: () => invoke<ClaudeRouteInfo | null>("claude_route"),
   sessionPrompt: (key: string, blocks: unknown[], planFirst: boolean, continueTurn: string | null = null) =>
     invoke<string>("session_prompt", { key, blocks, planFirst, continueTurn }),

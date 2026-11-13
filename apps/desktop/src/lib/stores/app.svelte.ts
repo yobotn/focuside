@@ -37,6 +37,9 @@ export interface Settings {
   /** Turn tracking in Claude panes: start them with the focuside plugin (--plugin-dir). On by
    * default. v0.2.0 stored null before its one-time question; null counts as on. */
   claudeHooks: boolean;
+  /** Brief replies in Claude panes: the plugin also carries an output style that tells Claude to
+   * answer in one line. Off by default (owner decision 2026-11-13). Needs turn tracking. */
+  claudeBrief: boolean;
   /** Where the session tabs are: a strip in the identity bar, or a list in the side panel. */
   sessionTabs: SessionTabs;
   /** Agent ids whose chat mode the user confirmed once after a terms note (see CHAT_CONFIRM). */
@@ -103,7 +106,7 @@ const defaults: Persisted = {
   sessions: {},
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, sessionTabs: "top", chatConfirmed: [] },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [] },
   filesVisible: true,
   layout: { ...defaultLayout },
 };
@@ -194,6 +197,7 @@ class AppStore {
       this.settings = st.settings;
       // Turn tracking is on unless the user turned it off (v0.2.0 stored null before asking).
       if (typeof this.settings.claudeHooks !== "boolean") this.settings.claudeHooks = true;
+      if (typeof this.settings.claudeBrief !== "boolean") this.settings.claudeBrief = false;
       if (this.settings.sessionTabs !== "side") this.settings.sessionTabs = "top";
       this.filesVisible = st.filesVisible;
       this.layout = { ...defaultLayout, ...(raw?.layout ?? {}) };
@@ -437,9 +441,10 @@ class AppStore {
       const claudePane = m === "pane" && agent === "claude";
       const hooks = claudePane && this.settings.claudeHooks;
       const planFirst = claudePane && this.planFirst;
+      const brief = hooks && this.settings.claudeBrief;
       const key =
         m === "pane"
-          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane", hooks, planFirst)
+          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane", hooks, planFirst, brief)
           : await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
       const s = new Session(key, p.id, p.root, resume);
       s.agent = agent;
@@ -546,7 +551,7 @@ class AppStore {
     if (s && this.focused && (s.waiting === "done" || s.waiting === "failed")) s.waiting = null;
   }
 
-  private sessionFor(key: string): Session | undefined {
+  sessionFor(key: string): Session | undefined {
     for (const p of this.projects) {
       const s = p.sessions.find((x) => x.key === key);
       if (s) return s;
@@ -699,13 +704,16 @@ class AppStore {
     if (s?.mode === "pane") s.note(t("pane.undoNote", { agent: this.agentName(s.agent) }), "warn");
   }
 
-  /** Checkpoint in a pane: the turn ends (changes card) and the next one starts. */
-  async checkpoint(s: Session) {
-    if (s.mode !== "pane") return;
+  /** The mode button of a Claude pane: one Shift+Tab key sequence, sent only on this click and
+   * only while no prompt runs. Claude moves to its next permission mode; the shown mode
+   * follows the TUI's status line and hook events. */
+  async paneModeKey(s: Session) {
+    if (s.mode !== "pane" || s.agent !== "claude") return;
     try {
-      await api.sessionCheckpoint(s.key);
+      await api.paneModeKey(s.key);
     } catch (e) {
-      this.flash(errText(e), "error");
+      const msg = errText(e);
+      this.flash(msg === "busy" ? t("pane.modeBusy") : msg === "closed" ? t("pane.exitedShort") : msg, "error");
     }
   }
 

@@ -165,7 +165,6 @@
       if (a.path && a.tui)
         items.push({ id: `pane-${a.id}`, label: t("cmd.openPane", { name: a.name }), run: () => app.newSession(undefined, a.id, "pane") });
     }
-    if (s?.mode === "pane" && s.paneAlive) items.unshift({ id: "checkpoint", label: t("cmd.checkpoint"), run: () => app.checkpoint(s) });
     if (s?.running) items.unshift({ id: "stop", label: t("cmd.stop"), hint: keyLabel("Mod+."), run: () => app.stop(s) });
     const lastDone = s?.entries.findLast((e) => (e.t === "changes" || (e.t === "plan" && ["done", "paused", "failed"].includes(e.state))) && !e.undo);
     if (s && lastDone && (lastDone.t === "changes" || lastDone.t === "plan"))

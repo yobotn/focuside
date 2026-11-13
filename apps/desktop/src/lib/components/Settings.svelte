@@ -185,6 +185,22 @@
           <span class="block text-fg-muted">{t("hooks.claudeHint")}</span>
         </span>
       </label>
+      <label class="mt-3 flex items-start gap-2">
+        <input
+          type="checkbox"
+          class="mt-0.5"
+          checked={app.settings.claudeBrief}
+          disabled={!app.settings.claudeHooks}
+          onchange={(e) => {
+            app.settings.claudeBrief = e.currentTarget.checked;
+            app.save();
+          }}
+        />
+        <span class:text-fg-muted={!app.settings.claudeHooks}>
+          {t("brief.label")}
+          <span class="block text-fg-muted">{t("brief.hint")}</span>
+        </span>
+      </label>
       {#if hooks && !hooks.helper}
         <p class="mt-2 text-warn">{t("hooks.helperMissing")}</p>
       {/if}

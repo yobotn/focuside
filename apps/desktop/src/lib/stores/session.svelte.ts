@@ -99,10 +99,15 @@ export class Session {
   hooksExpected = $state(false);
   /** Pane: started in the agent's plan mode (Plan first, Claude only). */
   panePlan = $state(false);
-  /** Pane: a hook event arrived. Turns now start on a prompt and end when the agent stops. */
+  /** Pane: a hook event arrived. Turns start on a prompt and end when the agent stops. */
   hooksLive = $state(false);
-  /** Pane: the open turn came from a hook (a prompt) or from Checkpoint. */
-  turnSource = $state<"hook" | "manual" | null>(null);
+  /** Pane: a prompt runs (hooks: between UserPromptSubmit and Stop). */
+  paneWorking = $state(false);
+  /** Pane (Claude): the permission mode, from the last hook event or the TUI's status line.
+   * Null when unknown. */
+  paneMode = $state<string | null>(null);
+  /** Pane: the agent's todo list (TodoWrite or the Task tools, from hooks). */
+  paneTodos = $state<{ content: string; status: string }[]>([]);
   name = $state("");
   renamed = $state(false);
   status = $state<Status>("idle");
@@ -150,7 +155,7 @@ export class Session {
 
   /** Working on a prompt: a chat turn, or a pane prompt that hooks reported. For the tabs. */
   get busy(): boolean {
-    return this.mode === "pane" ? this.tracking === "on" && this.turnSource === "hook" : this.running;
+    return this.mode === "pane" ? this.paneWorking : this.running;
   }
 
   /** True while this session holds its project for a turn that can change files. */
@@ -518,36 +523,56 @@ export class Session {
     return w;
   }
 
-  /** The approved plan of a pane turn, for "Not in plan" rows in its changes card. */
-  panePlanOf(turnId: string): ParsedPlan | null {
-    const p = this.entries.findLast((x) => x.t === "panePlan" && x.turnId === turnId && x.approved);
-    return p && p.t === "panePlan" ? p.plan : null;
+  /** The newest plan for the plan panel: a pane plan from hooks, or a chat plan card. */
+  get latestPlan(): { text: string; approved: boolean | null } | null {
+    const p = this.entries.findLast((x) => x.t === "panePlan" || (x.t === "plan" && !!x.text));
+    if (!p) return null;
+    if (p.t === "panePlan") return { text: p.text, approved: p.approved };
+    return p.t === "plan" ? { text: p.text, approved: null } : null;
+  }
+
+  /** The todo list for the plan panel: from hooks in a pane, from the agent's plan updates in chat. */
+  get todos(): { content: string; status: string }[] {
+    return this.mode === "pane" ? this.paneTodos : this.todo;
   }
 
   /**
-   * Events of a pane session. Turns come from hooks (a prompt starts one, Stop ends it) or,
-   * without hooks, from Checkpoint and pane exit (see pane.rs).
+   * Events of a pane session. Turns come from hooks only: a prompt starts one, Stop ends it
+   * (see pane.rs). A pane without hooks records no turns.
    */
   private handlePane(e: SessionEvent): Waiting | "none" {
     switch (e.kind) {
       case "pane_started":
         this.status = "ready";
         this.paneAlive = true;
+        this.paneWorking = false;
         this.hooksExpected = !!e.hooksExpected;
+        // A new TUI starts in its launch mode: plan with Plan first, else unknown until a hook
+        // event or the status line reports it.
+        this.paneMode = this.panePlan ? "plan" : null;
         break;
       case "pane_exited":
         this.paneAlive = false;
+        this.paneWorking = false;
         this.tracking = "off";
         this.turnId = null;
-        this.turnSource = null;
         break;
       case "hooks_live":
         this.hooksLive = true;
         break;
+      case "pane_working":
+        this.paneWorking = true;
+        break;
       case "pane_idle":
+        this.paneWorking = false;
         if (this.tracking !== "error") this.tracking = "waiting";
         this.turnId = null;
-        this.turnSource = null;
+        break;
+      case "pane_mode":
+        if (typeof e.mode === "string") this.paneMode = e.mode;
+        break;
+      case "pane_todos":
+        this.paneTodos = Array.isArray(e.todos) ? e.todos : [];
         break;
       case "pane_plan": {
         const plan: ParsedPlan = e.plan;
@@ -566,24 +591,20 @@ export class Session {
         this.tracking = "on";
         this.trackingError = null;
         this.turnId = e.turnId;
-        this.turnSource = e.source === "hook" ? "hook" : "manual";
         break;
       case "turn_untracked":
         this.tracking = e.reason === "otherRunning" ? "otherRunning" : "error";
         this.trackingError = e.error ?? null;
-        // With hooks the status changes again at the next Stop, so the card list keeps a note.
-        if (e.reason === "otherRunning" && e.source === "hook") this.note(t("pane.notTrackedHook"), "warn");
+        // The status changes again at the next Stop, so the plan panel keeps a note.
+        if (e.reason === "otherRunning") this.note(t("pane.notTrackedHook"), "warn");
         break;
       case "turn_ended": {
         const r = e as unknown as TurnResult;
         this.tracking = "off";
         this.turnId = null;
-        this.turnSource = null;
         this.updated = Date.now();
         if (r.hasSnapshot && (r.changes?.files.length || r.changes?.generated.length)) {
           this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
-        } else if (!r.snapshotError && e.reason === "checkpoint") {
-          this.note(t("pane.noChanges"));
         }
         if (r.failure != null) this.note(r.failure ? t("pane.stopFailure", { error: r.failure }) : t("pane.stopFailureUnknown"), "warn");
         if (r.snapshotError) this.note(t("changes.snapshotFailed", { error: r.snapshotError }), "error");

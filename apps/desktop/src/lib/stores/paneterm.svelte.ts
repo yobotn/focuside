@@ -4,13 +4,25 @@
 //
 // FocusIDE writes into the agent's PTY only what xterm.js reports as input: the user's keys
 // and paste, and xterm's own answers to terminal queries (cursor position). It never types a
-// prompt or a command into an agent pane.
+// prompt or a command into an agent pane. The one exception is the mode button of a Claude
+// pane, which sends one Shift+Tab key sequence on a user click (see pane.rs, `pane_mode_key`).
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { t } from "../i18n";
 import { decode, newTerminal } from "../xterm";
+
+/** Claude Code's status line for each permission mode (permission modes docs, checked live with
+ * Claude Code 2.1.x), with the mode names hooks report. The mode glyph comes first. */
+const MODE_LINES: [RegExp, string][] = [
+  [/[\u23f8\u23f5]\s*plan mode on/, "plan"],
+  [/[\u23f8\u23f5]\s*accept edits on/, "acceptEdits"],
+  [/[\u23f8\u23f5]\s*auto mode on/, "auto"],
+  [/[\u23f8\u23f5]\s*manual mode on/, "default"],
+  [/[\u23f8\u23f5]\s*bypass permissions on/, "bypassPermissions"],
+  [/[\u23f8\u23f5]\s*don.t ask on/, "dontAsk"],
+];
 
 export class PaneTerm {
   readonly key: string;
@@ -23,6 +35,9 @@ export class PaneTerm {
   exited = $state(false);
   private opened = false;
   private starting = false;
+  /** Gets the permission mode that the TUI's status line shows (Claude panes). */
+  onMode: ((mode: string) => void) | null = null;
+  private modeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(key: string, projectId: string) {
     this.key = key;
@@ -58,6 +73,28 @@ export class PaneTerm {
 
   detach() {
     this.el.remove();
+  }
+
+  /** New output arrived: read the status line shortly after the screen settles. */
+  output(bytes: Uint8Array) {
+    this.term.write(bytes);
+    if (!this.onMode || this.modeTimer) return;
+    this.modeTimer = setTimeout(() => {
+      this.modeTimer = null;
+      const m = this.shownMode();
+      if (m) this.onMode?.(m);
+    }, 150);
+  }
+
+  /** The mode in the bottom lines of the screen, where Claude draws its status line. */
+  shownMode(): string | null {
+    const buf = this.term.buffer.active;
+    const last = buf.baseY + this.term.rows - 1;
+    for (let y = last; y > last - 8 && y >= 0; y--) {
+      const line = buf.getLine(y)?.translateToString(true) ?? "";
+      for (const [re, mode] of MODE_LINES) if (re.test(line)) return mode;
+    }
+    return null;
   }
 
   resize() {
@@ -98,6 +135,8 @@ export class PaneTerm {
   }
 
   dispose() {
+    if (this.modeTimer) clearTimeout(this.modeTimer);
+    this.onMode = null;
     this.el.remove();
     this.term.dispose();
   }
@@ -113,7 +152,7 @@ function flush(p: PaneTerm, id: string) {
   const e = early.get(id);
   early.delete(id);
   if (!e) return;
-  for (const c of e.chunks) p.term.write(c);
+  for (const c of e.chunks) p.output(c);
   if (e.exited) p.onExit();
 }
 
@@ -141,7 +180,7 @@ function listenOnce() {
   listen<{ id: string; data: string }>("pty", (e) => {
     const bytes = decode(e.payload.data);
     const p = owner(e.payload.id);
-    if (p) p.term.write(bytes);
+    if (p) p.output(bytes);
     else if ([...terms.values()].some((x) => x.ptyId === null)) hold(e.payload.id).chunks.push(bytes);
   });
   listen<{ id: string }>("pty-exit", (e) => {
