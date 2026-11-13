@@ -147,6 +147,55 @@ pub fn read_file(root: &Path, rel_path: &str) -> Result<FileContent> {
     }
 }
 
+/// Largest image the viewer shows.
+pub const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+/// Largest PDF the viewer shows.
+pub const MAX_PDF_BYTES: u64 = 100 * 1024 * 1024;
+
+/// MIME type of an image or PDF the viewer can show, from the file extension.
+pub fn media_mime(path: &str) -> Option<&'static str> {
+    let ext = Path::new(path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())?;
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "avif" => "image/avif",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
+        _ => return None,
+    })
+}
+
+/// Size limit for a media file, by MIME type.
+pub fn media_limit(mime: &str) -> u64 {
+    if mime == "application/pdf" {
+        MAX_PDF_BYTES
+    } else {
+        MAX_IMAGE_BYTES
+    }
+}
+
+/// Reads an image or PDF inside the project for the viewer. Fails for other types and for
+/// files above the limit of their type.
+pub fn read_media(root: &Path, rel_path: &str) -> Result<Vec<u8>> {
+    let Some(mime) = media_mime(rel_path) else {
+        bail!("This file type cannot be shown.");
+    };
+    let p = resolve(root, rel_path)?;
+    let size = std::fs::metadata(&p)
+        .with_context(|| format!("read {}", p.display()))?
+        .len();
+    if size > media_limit(mime) {
+        bail!("This file is too large to show.");
+    }
+    std::fs::read(&p).with_context(|| format!("read {}", p.display()))
+}
+
 pub fn write_file(root: &Path, rel_path: &str, content: &str) -> Result<()> {
     let p = resolve(root, rel_path)?;
     if let Some(parent) = p.parent() {
@@ -339,6 +388,15 @@ mod tests {
             FileContent::Missing
         ));
         assert!(read_file(d.path(), "../x").is_err());
+        assert_eq!(media_mime("a/B.PNG"), Some("image/png"));
+        assert_eq!(media_mime("doc.pdf"), Some("application/pdf"));
+        assert_eq!(media_mime("src/main.rs"), None);
+        assert_eq!(media_mime("noext"), None);
+        fs::write(d.path().join("pic.png"), [0x89, b'P', b'N', b'G']).unwrap();
+        assert_eq!(read_media(d.path(), "pic.png").unwrap().len(), 4);
+        assert!(read_media(d.path(), "src/main.rs").is_err());
+        assert!(read_media(d.path(), "../pic.png").is_err());
+        assert!(read_media(d.path(), "gone.png").is_err());
         write_file(d.path(), "new/dir/f.txt", "hi").unwrap();
         assert_eq!(
             fs::read_to_string(d.path().join("new/dir/f.txt")).unwrap(),

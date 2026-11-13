@@ -151,19 +151,8 @@ pub async fn fs_image(state: State<'_, AppState>, project_id: String, path: Stri
     let p = project(&state, &project_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let full = files::resolve(&p.root, &path).map_err(|e| format!("{e:#}"))?;
-        let ext = full
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        let mime = match ext.as_str() {
-            "png" => "image/png",
-            "jpg" | "jpeg" => "image/jpeg",
-            "gif" => "image/gif",
-            "webp" => "image/webp",
-            "svg" => "image/svg+xml",
-            "avif" => "image/avif",
-            "bmp" => "image/bmp",
-            "ico" => "image/x-icon",
+        let mime = match files::media_mime(&path) {
+            Some(m) if m.starts_with("image/") => m,
             _ => return Err("Not an image.".to_string()),
         };
         let meta = std::fs::metadata(&full).map_err(|e| e.to_string())?;
@@ -176,4 +165,20 @@ pub async fn fs_image(state: State<'_, AppState>, project_id: String, path: Stri
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// An image or PDF inside the project as raw bytes, for the viewer. Images up to 50 MB,
+/// PDFs up to 100 MB. Raw bytes avoid base64 over IPC and need no asset protocol.
+#[tauri::command]
+pub async fn fs_media(
+    state: State<'_, AppState>,
+    project_id: String,
+    path: String,
+) -> Res<tauri::ipc::Response> {
+    let p = project(&state, &project_id)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || files::read_media(&p.root, &path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
 }

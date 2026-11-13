@@ -11,7 +11,10 @@
   import type { FileVersions } from "../types";
   import CodeEditor from "./CodeEditor.svelte";
   import FileIcon from "./FileIcon.svelte";
+  import ImageView from "./ImageView.svelte";
   import Markdown from "./Markdown.svelte";
+  import PdfView from "./PdfView.svelte";
+  import { imageBlob, mediaKind, mediaLimit } from "../media";
 
   type Content =
     | { kind: "text"; content: string; size: number }
@@ -24,6 +27,8 @@
   const v = $derived(app.viewer!);
   const path = $derived(v.kind === "file" ? v.path : v.paths[v.index]);
   const isMd = $derived(/\.(md|markdown|mdx)$/i.test(path));
+  const isSvg = $derived(/\.svg$/i.test(path));
+  const media = $derived(mediaKind(path));
 
   let content = $state<Content | null>(null);
   let text = $state("");
@@ -33,6 +38,10 @@
   let changedOnDisk = $state(false);
   let versions = $state<FileVersions | null>(null);
   let panel: HTMLElement | undefined = $state();
+  // Image or PDF bytes for the file view, and both sides of a changed image in the diff view.
+  let mediaData = $state.raw<{ path: string; buf: ArrayBuffer } | null>(null);
+  let mediaError = $state<string | null>(null);
+  let diffImages = $state.raw<{ before: Blob | null; after: Blob | null } | null>(null);
 
   const dirty = $derived(content?.kind === "text" && text !== saved);
 
@@ -47,16 +56,45 @@
         text = c.content;
         saved = c.content;
       }
+      await loadMedia(p, c);
     } catch (e) {
       error = errText(e);
+    }
+  }
+
+  /** Loads image or PDF bytes. SVG files that are text render from the text instead. */
+  async function loadMedia(p: string, c: Content) {
+    const kind = mediaKind(p);
+    if (!kind || c.kind === "missing" || c.kind === "text" || c.size > mediaLimit(kind)) {
+      if (mediaData?.path !== p) mediaData = null;
+      return;
+    }
+    try {
+      const buf = await invoke<ArrayBuffer>("fs_media", { projectId: project.id, path: p });
+      if (p === path) {
+        mediaError = null;
+        mediaData = { path: p, buf };
+      }
+    } catch (e) {
+      if (p === path) mediaError = errText(e);
     }
   }
 
   async function loadDiff(turnId: string, p: string) {
     error = null;
     versions = null;
+    diffImages = null;
     try {
       const r = await api.fileVersions(project.id, turnId, p);
+      if (r.binary && mediaKind(p) === "image") {
+        const side = (after: boolean) =>
+          invoke<ArrayBuffer>("turn_file_bytes", { projectId: project.id, turnId, path: p, after }).then(
+            (b) => imageBlob(p, b),
+            () => null,
+          );
+        const [before, after] = await Promise.all([side(false), side(true)]);
+        if (p === path && (before || after)) diffImages = { before, after };
+      }
       if (p === path) versions = r;
     } catch (e) {
       error = errText(e);
@@ -68,6 +106,7 @@
     if (!cur) return;
     if (cur.kind === "file") {
       source = false;
+      mediaError = null;
       loadFile(cur.path);
     } else {
       loadDiff(cur.turnId, cur.paths[cur.index]);
@@ -90,6 +129,7 @@
           text = c.content;
           saved = c.content;
         }
+        loadMedia(path, c);
       }
     });
     return () => {
@@ -154,6 +194,11 @@
   }
 
   const name = $derived(path.split("/").pop() ?? path);
+  // An SVG that is text renders from the editor text, so unsaved edits show too.
+  const svgBlob = $derived(isSvg && content?.kind === "text" ? imageBlob(path, text) : null);
+  const mediaBlob = $derived(media === "image" && mediaData?.path === path ? imageBlob(path, mediaData.buf) : null);
+  const pdfData = $derived(media === "pdf" && mediaData?.path === path ? new Uint8Array(mediaData.buf) : null);
+  const mediaTooBig = $derived(!!media && !!content && content.kind !== "missing" && content.kind !== "text" && content.size > mediaLimit(media));
 </script>
 
 <svelte:window onkeydown={onwindowkey} />
@@ -173,7 +218,7 @@
       <button class="icon-btn" onclick={() => step(-1)} disabled={v.index === 0} title="{t('viewer.prevFile')} (K)" aria-label={t("viewer.prevFile")}><CaretLeft size={14} /></button>
       <button class="icon-btn" onclick={() => step(1)} disabled={v.index >= v.paths.length - 1} title="{t('viewer.nextFile')} (J)" aria-label={t("viewer.nextFile")}><CaretRight size={14} /></button>
       <button class="btn h-6" onclick={revertFile} title={t("undo.revertFile")}><ArrowCounterClockwise size={13} />{t("undo.revertFile")}</button>
-    {:else if isMd && content?.kind === "text"}
+    {:else if (isMd || isSvg) && content?.kind === "text"}
       <button class="btn h-6" onclick={() => (source = !source)}>{source ? t("viewer.preview") : t("viewer.source")}</button>
     {/if}
     {#if v.kind === "file" && dirty}
@@ -204,6 +249,19 @@
     {:else if v.kind === "diff"}
       {#if !versions}
         <p class="p-4 text-fg-muted">{t("common.loading")}</p>
+      {:else if versions.binary && diffImages}
+        <div class="sides">
+          {#each [{ label: t("viewer.before"), blob: diffImages.before }, { label: t("viewer.after"), blob: diffImages.after }] as side (side.label)}
+            <div class="side">
+              <p class="side-label">{side.label}</p>
+              {#if side.blob}
+                <ImageView blob={side.blob} label="{side.label}: {name}" compact />
+              {:else}
+                <p class="p-4 text-fg-muted">{t("viewer.noVersion")}</p>
+              {/if}
+            </div>
+          {/each}
+        </div>
       {:else if versions.binary}
         <p class="p-4 text-fg-muted">{t("viewer.binary", { size: "" })}</p>
       {:else if versions.after === null}
@@ -216,6 +274,27 @@
       <p class="p-4 text-fg-muted">{t("common.loading")}</p>
     {:else if content.kind === "missing"}
       <p class="p-4 text-fg-muted">{t("viewer.notFound", { path })}</p>
+    {:else if !source && svgBlob}
+      {#key path}<ImageView blob={svgBlob} label={name} />{/key}
+    {:else if media && content.kind !== "text" && (mediaTooBig || mediaError)}
+      <div class="p-4">
+        <p class="mb-3 text-fg-muted selectable">
+          {#if mediaError}
+            {media === "pdf" ? t("media.pdfFailed", { error: mediaError }) : mediaError}
+          {:else}
+            {t(media === "pdf" ? "media.pdfTooLarge" : "media.imageTooLarge", { size: formatSize(content.size), limit: formatSize(mediaLimit(media)) })}
+          {/if}
+        </p>
+        <button class="btn" onclick={() => openPath(project.root + "/" + path).catch((e) => app.flash(String(e), "error"))}>
+          {t("viewer.openSystem")}
+        </button>
+      </div>
+    {:else if mediaBlob}
+      {#key path}<ImageView blob={mediaBlob} label={name} />{/key}
+    {:else if pdfData}
+      {#key path}<PdfView data={pdfData} />{/key}
+    {:else if media && content.kind !== "text"}
+      <p class="p-4 text-fg-muted">{t("common.loading")}</p>
     {:else if content.kind === "binary" || content.kind === "large"}
       <div class="p-4">
         <p class="mb-3 text-fg-muted">
@@ -278,6 +357,27 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
+  }
+  .sides {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1px;
+    background: var(--border);
+  }
+  .side {
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+    min-width: 0;
+    background: var(--bg);
+  }
+  .side-label {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 12px;
   }
   .md {
     padding: 20px 28px 40px;

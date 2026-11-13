@@ -51,6 +51,7 @@
     "codemirror": "^6.0.2",
     "dompurify": "^3.4.17",
     "markdown-it": "^15.0.3",
+    "pdfjs-dist": "^6.5.438",
     "phosphor-svelte": "^3.1.1",
     "shiki": "^4.6.0"
   }

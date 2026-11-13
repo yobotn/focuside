@@ -682,6 +682,24 @@ Verified: `npm run lint`, `npm test` (new tests: plan arguments are allowed and 
 
 Not verified: the app window was not clicked through (tabs, side panel, Ctrl+Tab in a pane, the Turns toggle and the new Claude route panel were checked by svelte-check and a dev build only). Whether Shift+Tab reaches Claude through xterm.js and ConPTY on Windows, or Alt+M is needed.
 
+### Image and PDF viewer (2026-11-13)
+
+The viewer shows images (png, jpg, jpeg, gif, webp, bmp, ico, avif, svg) and PDFs instead of "This is a binary file".
+
+| Decision | Why |
+|---|---|
+| New command `fs_media` returns the raw bytes as a `tauri::ipc::Response` (an ArrayBuffer in the UI). Images up to 50 MB, PDFs up to 100 MB (`crates/core/src/files.rs`). Above the limit the viewer says the size and the limit and offers "Open with system app". Same path check as every file command (`files::resolve`) | Raw bytes avoid base64 over IPC. No asset protocol, no new scope and no CSP change: `img-src` already allows `blob:` |
+| `fs_image` (Markdown images) stays at 8 MB and data URLs | Images inside a document are small; the standalone viewer has its own limit |
+| Images are always an `img` element with a blob URL. SVG files that are text render from the editor text (Preview and Source toggle, like Markdown). SVG is never inserted as DOM | An SVG in an `img` element runs no scripts and loads nothing |
+| Image view: Fit (default, never larger than 100%), 100%, zoom buttons, Ctrl+wheel, + and - keys, 0 for fit, 1 for 100%. Checkerboard behind the image. Info line with pixel size and file size | |
+| PDFs render with PDF.js (`pdfjs-dist` 6.5, legacy build for older WebKit), one page per canvas, with page buttons, a page field, Page Up and Page Down, Fit width, 100%, zoom buttons and Ctrl+wheel. No text layer, links or forms | WebView2 has a PDF viewer, WKWebView and WebKitGTK do not. PDF.js runs the same on all three |
+| PDF.js loads only when a PDF opens (dynamic import, own chunk). Its worker, standard fonts, CMaps, ICC profile and JPEG 2000 / JBIG2 decoders are bundled under `/pdfjs/` by a small plugin in `vite.config.ts`. `quickjs` (PDF scripting) is left out. Nothing is fetched from the web | Works offline. PDF.js 6 has no `isEvalSupported` option and no eval code path; the CSP has no `unsafe-eval`. Document JavaScript would need the PDF.js viewer's scripting sandbox, which is not used |
+| Diff view of a changed binary image: Before and After side by side (`turn_file_bytes`). A side that does not exist shows "Not in this version." Other binary files keep the binary message. Changed SVG files stay a text diff | |
+
+Bundle size: the PDF.js main chunk is 499 KB (152 KB gzip), the worker 1.3 MB, the data files 2.9 MB (CMaps 1.2 MB, fonts 0.8 MB, decoders 0.9 MB). About 4.7 MB in `dist`, about 2.3 MB compressed. None of it loads until a PDF opens. The PDF.js license (Apache 2.0) and the font and decoder license files ship next to the data.
+
+Checked in Chrome (same engine as WebView2) with the app CSP: PDF pages render with a standard font, page buttons and zoom work, PNG and SVG show with the checkerboard, + and Ctrl+wheel zoom, and an SVG `<script>` and `onload` handler did not run. Not checked: WKWebView and WebKitGTK, the diff view in the running app.
+
 ## 11. Open items
 
 1. Owner says go to create the public repo `yobotn/focuside` and push.
