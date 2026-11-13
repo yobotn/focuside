@@ -558,3 +558,19 @@ pub async fn turn_file_versions(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+/// One side of a changed image in a turn, as raw bytes, for the diff viewer.
+#[tauri::command]
+pub async fn turn_file_bytes(
+    state: State<'_, AppState>,
+    project_id: String,
+    turn_id: String,
+    path: String,
+    after: bool,
+) -> Res<tauri::ipc::Response> {
+    let p = project(&state, &project_id)?;
+    let bytes = turns::image_bytes(&p, &turn_id, &path, after)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}

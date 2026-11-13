@@ -258,8 +258,12 @@ pub struct FileVersions {
     pub binary: bool,
 }
 
-/// File content before and after the turn, for the diff viewer.
-pub async fn versions(project: &Project, turn_id: &str, path: &str) -> Result<FileVersions> {
+/// The raw file before and after the turn. A renamed file is read from its old path before.
+async fn raw_versions(
+    project: &Project,
+    turn_id: &str,
+    path: &str,
+) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>)> {
     let rec = find(project, turn_id)?;
     let end = rec.end.clone().unwrap_or_else(|| rec.start.clone());
     let old_path = rec
@@ -272,6 +276,34 @@ pub async fn versions(project: &Project, turn_id: &str, path: &str) -> Result<Fi
     let repo = &project.shadow;
     let before = repo.read_file(&rec.start, &old_path).await?;
     let after = repo.read_file(&end, path).await?;
+    Ok((before, after))
+}
+
+/// One side of a changed image, for the image diff. Fails when that side does not exist,
+/// is not an image type or is above the image size limit.
+pub async fn image_bytes(
+    project: &Project,
+    turn_id: &str,
+    path: &str,
+    after: bool,
+) -> Result<Vec<u8>> {
+    match focuside_core::files::media_mime(path) {
+        Some(m) if m.starts_with("image/") => {}
+        _ => anyhow::bail!("Not an image."),
+    }
+    let (before, after_bytes) = raw_versions(project, turn_id, path).await?;
+    let Some(bytes) = (if after { after_bytes } else { before }) else {
+        anyhow::bail!("This version does not exist.");
+    };
+    if bytes.len() as u64 > focuside_core::files::MAX_IMAGE_BYTES {
+        anyhow::bail!("This file is too large to show.");
+    }
+    Ok(bytes)
+}
+
+/// File content before and after the turn, for the diff viewer.
+pub async fn versions(project: &Project, turn_id: &str, path: &str) -> Result<FileVersions> {
+    let (before, after) = raw_versions(project, turn_id, path).await?;
     let is_bin = |b: &Option<Vec<u8>>| {
         b.as_ref()
             .map(|b| b.iter().take(8000).any(|c| *c == 0) || std::str::from_utf8(b).is_err())

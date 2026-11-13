@@ -205,3 +205,10 @@ FocusIDE is licensed under the GNU General Public License v3.0 (see [LICENSE](LI
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+## PDF.js
+
+- What: `pdfjs-dist` 6.5.438, bundled in the app to show PDF files in the viewer. It loads only when a PDF opens.
+- Source: https://github.com/mozilla/pdf.js
+- License: Apache License 2.0 (the same text as above). Copyright Mozilla Foundation.
+- Data files from the same package ship under `pdfjs/` with their own license files: standard fonts (Foxit and Liberation fonts), CMaps (Adobe), an ICC profile, and the JPEG 2000 (OpenJPEG) and JBIG2 decoders.
