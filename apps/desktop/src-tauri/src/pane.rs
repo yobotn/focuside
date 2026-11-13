@@ -5,19 +5,19 @@
 //! Every pane gets `FOCUSIDE_EVENTS`, a folder in app data where the `focuside-hook` helper
 //! writes hook events (see hooks.rs). A watcher on that folder feeds `on_hook`.
 //!
-//! Turn boundaries:
-//! - Without hooks (no event seen yet, and no plugin passed): a turn starts when the pane
-//!   opens and right after each Checkpoint, and ends on Checkpoint, pane exit and pane close.
-//!   The pane holds the project claim while its turn is open (Phase 2).
-//! - With hooks (an event arrived): a turn starts on UserPromptSubmit and ends on Stop or
-//!   StopFailure. The claim is held only in between. It is also released by the next
-//!   UserPromptSubmit (Stop does not fire after an interrupt), Checkpoint, pane exit and pane
-//!   close. A prompt that arrives while another session holds the claim records no turn.
-//! - A Claude pane started with the plugin expects hooks, so it starts no turn when it opens.
-//!   Until the first event arrives, Checkpoint starts a turn by hand, as without hooks.
+//! Turns come from hooks only: a turn starts on UserPromptSubmit and ends on Stop or
+//! StopFailure. The claim is held only in between. It is also released by the next
+//! UserPromptSubmit (Stop does not fire after an interrupt), pane exit and pane close. A prompt
+//! that arrives while another session holds the claim records no turn. A pane without hooks
+//! (turn tracking off, hooks blocked, or an agent without hooks) records no turns.
+//!
+//! Hook events also carry the plan (ExitPlanMode), the todo list (TodoWrite, TaskCreate,
+//! TaskUpdate) and Claude's permission mode. The mode button sends one Shift+Tab key
+//! sequence (`MODE_KEY`) on a user click, only while no prompt runs (see `mode_key_ready`).
 //!
 //! Events go to the UI as `session` events, like chat sessions: `turn_started`, `turn_ended`,
-//! `turn_untracked`, `pane_started`, `pane_exited`, `pane_idle`, `pane_plan`, `hooks_live`.
+//! `turn_untracked`, `pane_started`, `pane_exited`, `pane_working`, `pane_idle`, `pane_plan`,
+//! `pane_todos`, `pane_mode`, `hooks_live`.
 
 use crate::project::Project;
 use crate::pty::Launch;
@@ -34,27 +34,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
-/// Where a turn's boundaries come from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    /// Pane open or Checkpoint (no hooks).
-    Manual,
-    /// UserPromptSubmit.
-    Hook,
-}
-
-impl Source {
-    fn name(self) -> &'static str {
-        match self {
-            Source::Manual => "manual",
-            Source::Hook => "hook",
-        }
-    }
-}
+/// The key sequence of Shift+Tab (CSI Z). The mode button sends it; Claude Code moves to its
+/// next permission mode. It is the same input as the user pressing Shift+Tab in the pane.
+pub const MODE_KEY: &[u8] = b"\x1b[Z";
 
 struct PaneTurn {
     id: String,
-    source: Source,
     start: Snapshot,
     your_edits: BTreeSet<String>,
     /// From PostToolUse: files the agent's edit tools wrote, shell commands it ran.
@@ -73,6 +58,70 @@ struct PaneState {
     closed: bool,
     /// A hook event arrived from this pane.
     hooks_live: bool,
+    /// A prompt runs: between UserPromptSubmit and Stop or StopFailure.
+    working: bool,
+    /// The permission mode from the last hook event that had one.
+    mode: Option<String>,
+    /// The agent's todo list, from TodoWrite or the Task tools.
+    todos: Vec<Todo>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Todo {
+    /// Task id (TaskCreate). None for TodoWrite items.
+    id: Option<String>,
+    content: String,
+    status: String,
+}
+
+/// Applies one todo change from the helper (`todo` field, see crates/hook) to `list`.
+fn apply_todo(list: &mut Vec<Todo>, change: &Value) {
+    let s = |v: &Value| v.as_str().map(String::from);
+    match change["kind"].as_str() {
+        Some("list") => {
+            *list = change["items"]
+                .as_array()
+                .map(|a| a.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|t| {
+                    Some(Todo {
+                        id: None,
+                        content: s(&t["content"])?,
+                        status: s(&t["status"]).unwrap_or_else(|| "pending".into()),
+                    })
+                })
+                .collect();
+        }
+        Some("create") => {
+            if let Some(content) = s(&change["subject"]) {
+                // A list from TodoWrite does not mix with Task tools.
+                list.retain(|t| t.id.is_some());
+                list.push(Todo {
+                    id: s(&change["id"]),
+                    content,
+                    status: "pending".into(),
+                });
+            }
+        }
+        Some("update") => {
+            let id = s(&change["id"]);
+            let Some(i) = list.iter().position(|t| t.id.is_some() && t.id == id) else {
+                return;
+            };
+            match change["status"].as_str() {
+                Some("deleted") => {
+                    list.remove(i);
+                }
+                Some(st) => list[i].status = st.to_string(),
+                None => {}
+            }
+            if let (Some(t), Some(c)) = (list.get_mut(i), s(&change["subject"])) {
+                t.content = c;
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Sends a `session` event to the UI.
@@ -89,6 +138,8 @@ pub struct Pane {
     pub events_dir: PathBuf,
     /// Started with the focuside plugin (`--plugin-dir`), so hooks are expected.
     pub hooks_expected: bool,
+    /// Claude only: the mode button may send Shift+Tab.
+    pub mode_key: bool,
     sink: Sink,
     recorder: TurnRecorder,
     st: Mutex<PaneState>,
@@ -99,8 +150,8 @@ pub struct Pane {
 }
 
 /// The PTY launch for an agent TUI: the resolved program and arguments, plus
-/// `FOCUSIDE_EVENTS`. With `plugin`, `--plugin-dir <plugin>` is added (Claude only, after the
-/// user agreed). Nothing else is added and nothing is removed.
+/// `FOCUSIDE_EVENTS`. With `plugin`, `--plugin-dir <plugin>` is added (Claude only, while turn
+/// tracking is on). Nothing else is added and nothing is removed.
 pub fn launch_for(tui: TuiCommand, events_dir: &Path, plugin: Option<&Path>) -> Launch {
     let mut args = tui.args;
     if let Some(p) = plugin {
@@ -183,6 +234,7 @@ impl Pane {
             recorder: TurnRecorder::new(project.clone(), &key),
             launch: launch_for(tui, &events_dir, plugin.as_deref()),
             hooks_expected: plugin.is_some(),
+            mode_key: agent == "claude",
             key,
             project,
             agent: agent.to_string(),
@@ -253,25 +305,17 @@ impl Pane {
         !st.closed && st.pty.is_some()
     }
 
-    /// True when turns come from hooks: an event arrived, or the plugin was passed.
-    fn hook_mode(&self) -> bool {
-        self.hooks_expected || self.st.lock().unwrap().hooks_live
-    }
-
-    /// The TUI started: close a turn left open, then start one unless hooks start turns.
+    /// The TUI started: close a turn left open. The next prompt starts a turn (hooks).
     pub async fn on_pty_open(self: &Arc<Self>) {
         let _g = self.turn_lock.lock().await;
         self.end_locked("open").await;
+        self.st.lock().unwrap().working = false;
         if self.running() {
             self.emit(
                 "pane_started",
                 json!({ "hooksExpected": self.hooks_expected }),
             );
-            if self.hook_mode() {
-                self.emit("pane_idle", json!({}));
-            } else {
-                self.begin_locked(Source::Manual).await;
-            }
+            self.emit("pane_idle", json!({}));
         }
     }
 
@@ -283,6 +327,7 @@ impl Pane {
                 return;
             }
             st.pty = None;
+            st.working = false;
         }
         let _g = self.turn_lock.lock().await;
         self.end_locked("exit").await;
@@ -296,29 +341,46 @@ impl Pane {
         }
         let event = ev["event"].as_str().unwrap_or("");
         let _g = self.turn_lock.lock().await;
-        let first = {
+        let (first, mode) = {
             let mut st = self.st.lock().unwrap();
             if st.closed {
                 return;
             }
-            !std::mem::replace(&mut st.hooks_live, true)
+            let first = !std::mem::replace(&mut st.hooks_live, true);
+            let mode = ev["mode"]
+                .as_str()
+                .filter(|m| st.mode.as_deref() != Some(*m))
+                .map(String::from);
+            if mode.is_some() {
+                st.mode.clone_from(&mode);
+            }
+            (first, mode)
         };
         if first {
             self.emit("hooks_live", json!({}));
         }
+        if let Some(m) = mode {
+            self.emit("pane_mode", json!({ "mode": m }));
+        }
         match event {
             "UserPromptSubmit" => {
-                // Also closes a turn whose Stop never came (interrupt) or a Checkpoint turn.
+                self.st.lock().unwrap().working = true;
+                self.emit("pane_working", json!({}));
+                // Also closes a turn whose Stop never came (interrupt).
                 self.end_locked("prompt").await;
-                self.begin_locked(Source::Hook).await;
+                self.begin_locked().await;
             }
             "Stop" | "StopFailure" => {
                 let failure = ev["error"].as_str().map(String::from);
-                if let Some(t) = self.st.lock().unwrap().turn.as_mut() {
-                    if event == "Stop" {
-                        t.last_message = ev["lastMessage"].as_str().map(String::from);
-                    } else {
-                        t.failure = failure.clone().or(Some(String::new()));
+                {
+                    let mut st = self.st.lock().unwrap();
+                    st.working = false;
+                    if let Some(t) = st.turn.as_mut() {
+                        if event == "Stop" {
+                            t.last_message = ev["lastMessage"].as_str().map(String::from);
+                        } else {
+                            t.failure = failure.clone().or(Some(String::new()));
+                        }
                     }
                 }
                 let reason = if event == "Stop" {
@@ -360,6 +422,17 @@ impl Pane {
         if event != "PostToolUse" {
             return;
         }
+        if ev["todo"].is_object() {
+            let todos: Vec<Value> = {
+                let mut st = self.st.lock().unwrap();
+                apply_todo(&mut st.todos, &ev["todo"]);
+                st.todos
+                    .iter()
+                    .map(|t| json!({ "content": t.content, "status": t.status }))
+                    .collect()
+            };
+            self.emit("pane_todos", json!({ "todos": todos }));
+        }
         let mut st = self.st.lock().unwrap();
         let Some(t) = st.turn.as_mut() else { return };
         if let Some(c) = ev["command"].as_str().filter(|c| !c.trim().is_empty()) {
@@ -372,55 +445,30 @@ impl Pane {
         }
     }
 
-    /// Starts a turn by hand (after undo) if none is open and the TUI runs.
-    pub async fn begin(self: &Arc<Self>) {
-        let _g = self.turn_lock.lock().await;
-        self.begin_locked(Source::Manual).await;
-    }
-
-    /// Ends the open turn, if any. `reason` goes to the UI. Returns true when a turn was open.
-    pub async fn end_turn(self: &Arc<Self>, reason: &str) -> bool {
-        let _g = self.turn_lock.lock().await;
-        self.end_locked(reason).await
-    }
-
-    /// Undo and redo need the project free. A turn started by a hook belongs to a running
-    /// prompt: like a chat turn, it has to finish first (Err). A turn started by hand ends
-    /// here; Ok(true) tells the caller to start the next one after the undo.
-    pub async fn end_for_undo(self: &Arc<Self>) -> Result<bool, ()> {
-        let _g = self.turn_lock.lock().await;
-        let source = self.st.lock().unwrap().turn.as_ref().map(|t| t.source);
-        match source {
-            None => Ok(false),
-            Some(Source::Hook) => Err(()),
-            Some(Source::Manual) => {
-                self.end_locked("undo").await;
-                Ok(true)
-            }
+    /// The mode button may send Shift+Tab: a Claude TUI runs and no prompt runs. While a prompt
+    /// runs, Claude can show a permission or plan approval question, and Shift+Tab there
+    /// answers it ("pressing Shift+Tab there approves the plan", permission modes docs). Err
+    /// holds the reason for the UI.
+    pub fn mode_key_ready(&self) -> Result<String, &'static str> {
+        let st = self.st.lock().unwrap();
+        if !self.mode_key {
+            return Err("noModeKey");
         }
-    }
-
-    /// Checkpoint button: ends the open turn. Without hook events it also starts the next one;
-    /// with hooks the next prompt does. Also starts tracking again after an untracked turn.
-    pub async fn checkpoint(self: &Arc<Self>) {
-        let _g = self.turn_lock.lock().await;
-        self.end_locked("checkpoint").await;
-        if self.st.lock().unwrap().hooks_live {
-            self.emit("pane_idle", json!({}));
-        } else {
-            self.begin_locked(Source::Manual).await;
+        if st.closed {
+            return Err("closed");
         }
+        if st.working {
+            return Err("busy");
+        }
+        st.pty.clone().ok_or("closed")
     }
 
-    async fn begin_locked(self: &Arc<Self>, source: Source) {
+    async fn begin_locked(self: &Arc<Self>) {
         if !self.running() || self.st.lock().unwrap().turn.is_some() {
             return;
         }
         if !self.recorder.claim() {
-            self.emit(
-                "turn_untracked",
-                json!({ "reason": "otherRunning", "source": source.name() }),
-            );
+            self.emit("turn_untracked", json!({ "reason": "otherRunning" }));
             return;
         }
         let id = new_id("t");
@@ -428,7 +476,6 @@ impl Pane {
             Ok(start) => {
                 self.st.lock().unwrap().turn = Some(PaneTurn {
                     id: id.clone(),
-                    source,
                     start,
                     your_edits: BTreeSet::new(),
                     edits: BTreeSet::new(),
@@ -437,10 +484,7 @@ impl Pane {
                     last_message: None,
                     failure: None,
                 });
-                self.emit(
-                    "turn_started",
-                    json!({ "turnId": id, "pane": true, "source": source.name() }),
-                );
+                self.emit("turn_started", json!({ "turnId": id, "pane": true }));
             }
             Err(e) => self.emit(
                 "turn_untracked",
@@ -460,7 +504,6 @@ impl Pane {
             "hasSnapshot": true,
             "pane": true,
             "reason": reason,
-            "source": turn.source.name(),
             "failure": turn.failure,
         });
         let res = self
@@ -473,7 +516,7 @@ impl Pane {
                 your_edits: &turn.your_edits,
                 continued: false,
                 // Hook turns report edits and commands (PostToolUse), like ACP tool calls.
-                tools_known: turn.source == Source::Hook,
+                tools_known: true,
                 plan_steps: &turn.plan_steps,
                 last_message: turn.last_message.as_deref(),
             })
@@ -624,7 +667,6 @@ mod tests {
 
         let evs = f.events.lock().unwrap().clone();
         let ended = evs.iter().find(|e| e["kind"] == "turn_ended").unwrap();
-        assert_eq!(ended["source"], "hook");
         assert_eq!(ended["summary"]["files"], 1);
         assert_eq!(ended["summary"]["commands"][0], "cargo test");
         assert_eq!(ended["summary"]["planStepCount"], 2);
@@ -659,7 +701,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missed_stop_is_closed_by_the_next_prompt_or_checkpoint() {
+    async fn missed_stop_is_closed_by_the_next_prompt() {
         let f = fixture().await;
         let p = pane(&f, Some(PathBuf::from("/plugin")));
         p.on_pty_open().await;
@@ -677,13 +719,7 @@ mod tests {
         assert_eq!(ended.len(), 1);
         assert_eq!(ended[0]["reason"], "prompt");
         assert!(p.holds_claim());
-        // Undo has to wait for a hook turn.
-        assert!(p.end_for_undo().await.is_err());
-        // Checkpoint releases it and, with hooks, starts nothing.
-        p.checkpoint().await;
-        assert!(!p.holds_claim());
         // StopFailure also ends a turn.
-        p.on_hook(hook("UserPromptSubmit", json!({}))).await;
         p.on_hook(hook("StopFailure", json!({ "error": "rate_limit" })))
             .await;
         assert!(!p.holds_claim());
@@ -704,43 +740,111 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn without_hooks_phase_2_rules_hold() {
+    async fn without_hooks_no_turn_is_recorded() {
         let f = fixture().await;
         let p = pane(&f, None);
         p.on_pty_open().await;
-        assert!(
-            p.holds_claim(),
-            "no plugin: the turn starts when the pane opens"
-        );
-        assert_eq!(p.end_for_undo().await, Ok(true));
-        assert!(!p.holds_claim());
-        p.begin().await;
-        p.checkpoint().await;
-        assert!(p.holds_claim(), "Checkpoint starts the next turn");
+        assert!(!p.holds_claim(), "no turn starts when the pane opens");
+        std::fs::write(f.root.path().join("a.txt"), "two\n").unwrap();
+        p.on_pty_exit("pty1").await;
+        assert!(!kinds(&f).contains(&"turn_started".to_string()));
+        assert!(!kinds(&f).contains(&"turn_ended".to_string()));
         // Events from another agent are ignored.
-        let mut other = hook("Stop", json!({}));
+        let p = pane(&f, None);
+        let mut other = hook("UserPromptSubmit", json!({}));
         other["agent"] = json!("codex");
         p.on_hook(other).await;
-        assert!(p.holds_claim());
-        // The first hook event switches to hook turns: the prompt ends the manual turn.
-        p.on_hook(hook("UserPromptSubmit", json!({}))).await;
-        p.on_hook(hook("Stop", json!({}))).await;
         assert!(!p.holds_claim());
-        p.checkpoint().await;
-        assert!(!p.holds_claim(), "with hooks, Checkpoint starts nothing");
+        assert!(!kinds(&f).contains(&"hooks_live".to_string()));
+        // Hooks the user added (no plugin) still report turns.
+        p.on_hook(hook("UserPromptSubmit", json!({}))).await;
+        assert!(p.holds_claim());
         assert!(kinds(&f).contains(&"hooks_live".to_string()));
     }
 
     #[tokio::test]
-    async fn expected_hooks_that_never_run_fall_back_to_checkpoint() {
+    async fn mode_key_only_while_idle() {
         let f = fixture().await;
         let p = pane(&f, Some(PathBuf::from("/plugin")));
         p.on_pty_open().await;
-        assert!(!p.holds_claim());
-        p.checkpoint().await;
-        assert!(p.holds_claim(), "Checkpoint starts a turn by hand");
-        p.checkpoint().await;
-        assert!(p.holds_claim());
+        assert_eq!(p.mode_key_ready(), Ok("pty1".to_string()));
+        p.on_hook(hook("UserPromptSubmit", json!({ "mode": "plan" })))
+            .await;
+        // A prompt runs: Shift+Tab could answer a plan or permission question.
+        assert_eq!(p.mode_key_ready(), Err("busy"));
+        p.on_hook(hook("Stop", json!({ "mode": "plan" }))).await;
+        assert_eq!(p.mode_key_ready(), Ok("pty1".to_string()));
+        p.on_hook(hook("UserPromptSubmit", json!({ "mode": "auto" })))
+            .await;
+        let modes: Vec<Value> = f
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["kind"] == "pane_mode")
+            .map(|e| e["mode"].clone())
+            .collect();
+        assert_eq!(
+            modes,
+            vec![json!("plan"), json!("auto")],
+            "sent on change only"
+        );
+        p.on_pty_exit("pty1").await;
+        assert_eq!(p.mode_key_ready(), Err("closed"));
+        // Other agents: no mode key.
+        let events = f.events.clone();
+        let sink: Sink = Arc::new(move |v| events.lock().unwrap().push(v));
+        let tui = TuiCommand {
+            program: PathBuf::from("codex"),
+            args: vec![],
+        };
+        let c = Pane::with_sink(sink, f.project.clone(), "codex", tui, None);
+        c.set_pty(Some("pty2".into()));
+        assert_eq!(c.mode_key_ready(), Err("noModeKey"));
+    }
+
+    #[tokio::test]
+    async fn todo_list_from_todowrite_and_tasks() {
+        let f = fixture().await;
+        let p = pane(&f, Some(PathBuf::from("/plugin")));
+        p.on_pty_open().await;
+        let last_todos = || {
+            f.events
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|e| e["kind"] == "pane_todos")
+                .map(|e| e["todos"].clone())
+                .unwrap()
+        };
+        p.on_hook(hook(
+            "PostToolUse",
+            json!({ "tool": "TodoWrite", "todo": { "kind": "list", "items": [
+                { "content": "Add tests", "status": "completed" },
+                { "content": "Fix bug", "status": "in_progress" }
+            ] } }),
+        ))
+        .await;
+        assert_eq!(last_todos()[1]["status"], "in_progress");
+        // Task tools: create, update, delete. They replace a TodoWrite list.
+        for todo in [
+            json!({ "kind": "create", "id": "1", "subject": "Read code" }),
+            json!({ "kind": "create", "id": "2", "subject": "Write code" }),
+            json!({ "kind": "update", "id": "1", "status": "completed" }),
+            json!({ "kind": "update", "id": "2", "status": "deleted" }),
+            json!({ "kind": "update", "id": "9", "status": "completed" }),
+        ] {
+            p.on_hook(hook(
+                "PostToolUse",
+                json!({ "tool": "TaskUpdate", "todo": todo }),
+            ))
+            .await;
+        }
+        assert_eq!(
+            last_todos(),
+            json!([{ "content": "Read code", "status": "completed" }])
+        );
     }
 
     #[test]

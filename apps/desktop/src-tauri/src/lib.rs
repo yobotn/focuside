@@ -119,7 +119,7 @@ pub fn run() {
             commands::session_close,
             commands::session_set_config,
             commands::session_list,
-            commands::session_checkpoint,
+            commands::pane_mode_key,
             commands::claude_route,
             commands::hooks_info,
             commands::turn_undo_preview,

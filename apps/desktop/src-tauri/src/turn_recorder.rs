@@ -4,7 +4,7 @@
 //! work, then take an end snapshot, diff, record the turn, release the claim and prune old
 //! snapshots. The recorder does not know where turn boundaries come from. Chat sessions use
 //! the ACP prompt and its response. Panes use hook events (UserPromptSubmit, Stop,
-//! StopFailure) when hooks run, and the Checkpoint button and pane exit otherwise.
+//! StopFailure); a pane without hooks records no turns.
 
 use crate::project::Project;
 use crate::turns::{now, TurnRecord};

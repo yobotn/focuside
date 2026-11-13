@@ -225,7 +225,8 @@ pub async fn project_close(state: State<'_, AppState>, id: String) -> Res<()> {
 /// `mode` "pane" creates a pane session instead: the agent's own TUI, which the UI starts with
 /// `pty_open` and this session key. A pane always starts a fresh TUI; `resume` is not passed
 /// to the agent. `hooks` is the "Turn tracking in Claude panes" setting (on by default): only
-/// with true does a Claude pane get `--plugin-dir` with the generated focuside plugin.
+/// with true does a Claude pane get `--plugin-dir` with the generated focuside plugin. `brief`
+/// is "Brief replies in Claude panes" (off by default): the plugin copy with the output style.
 /// `plan_first` starts a Claude pane in plan mode (`--permission-mode plan`, see
 /// `agent::tui_plan_args`).
 #[tauri::command]
@@ -240,6 +241,7 @@ pub async fn session_start(
     mode: Option<String>,
     hooks: Option<bool>,
     plan_first: Option<bool>,
+    brief: Option<bool>,
 ) -> Res<String> {
     let p = project(&state, &project_id)?;
     if mode.as_deref() == Some("pane") {
@@ -249,7 +251,7 @@ pub async fn session_start(
             tui.start_in_plan_mode(agent_id);
         }
         let plugin = if agent_id == "claude" && hooks == Some(true) {
-            claude_plugin(&state.data_dir)
+            claude_plugin(&state.data_dir, brief == Some(true))
         } else {
             None
         };
@@ -383,12 +385,12 @@ async fn close_pane(state: &AppState, p: &Arc<Pane>) {
 
 /// Writes the focuside plugin folder for this OS. None (and a warning) when the helper is
 /// missing or the folder cannot be written; the pane then runs without hooks.
-fn claude_plugin(data_dir: &std::path::Path) -> Option<PathBuf> {
+fn claude_plugin(data_dir: &std::path::Path, brief: bool) -> Option<PathBuf> {
     let Some(helper) = crate::hooks::helper_path() else {
         tracing::warn!("focuside-hook not found next to the app; Claude pane runs without hooks");
         return None;
     };
-    crate::hooks::ensure_plugin(data_dir, &helper)
+    crate::hooks::ensure_plugin(data_dir, &helper, brief)
         .map_err(|e| tracing::warn!("focuside plugin: {e:#}"))
         .ok()
 }
@@ -406,11 +408,16 @@ pub fn hooks_info() -> Value {
     })
 }
 
-/// Checkpoint in a pane: ends the open turn (changes card, undo) and starts the next one.
+/// The mode button of a Claude pane: sends one Shift+Tab key sequence (ESC [ Z) to the pane's
+/// TUI, the same input as the user pressing Shift+Tab there. Claude Code moves to its next
+/// permission mode. Only this fixed sequence is sent, never text. Refused while a prompt runs
+/// ("busy"), because Shift+Tab answers an open plan or permission question.
 #[tauri::command]
-pub async fn session_checkpoint(state: State<'_, AppState>, key: String) -> Res<()> {
-    pane(&state, &key)?.checkpoint().await;
-    Ok(())
+pub fn pane_mode_key(state: State<'_, AppState>, key: String) -> Res<()> {
+    let pty_id = pane(&state, &key)?.mode_key_ready().map_err(String::from)?;
+    let ptys = state.ptys.lock().unwrap();
+    let pty = ptys.get(&pty_id).ok_or("closed")?;
+    pty.write(crate::pane::MODE_KEY).map_err(|e| e.to_string())
 }
 
 /// How the user's Claude Code is signed in, as a route: chat (API key or cloud provider) or
@@ -467,23 +474,11 @@ fn session_of_turn(state: &AppState, project_id: &str, turn_id: &str) -> Option<
 }
 
 /// Undo and redo need the project free. A chat turn must finish first, and so must a pane
-/// turn started by a hook (a prompt that runs). A pane turn started by hand (no hooks) is
-/// ended here, as with Checkpoint, and the caller starts the next one after the undo. Returns
-/// that pane.
-async fn open_pane_turn(state: &AppState, p: &Project) -> Res<Option<Arc<Pane>>> {
-    let Some(key) = p.running_session() else {
-        return Ok(None);
-    };
-    let pane = state.panes.lock().unwrap().get(&key).cloned();
-    match pane {
-        Some(pane) => match pane.end_for_undo().await {
-            Ok(true) => Ok(Some(pane)),
-            Ok(false) => Ok(None),
-            Err(()) => {
-                Err("Wait for the running turn to finish. In a pane, Checkpoint ends it.".into())
-            }
-        },
-        None => Err("Wait for the running turn to finish.".into()),
+/// turn (a prompt that runs).
+fn ensure_free(p: &Project) -> Res<()> {
+    match p.running_session() {
+        Some(_) => Err("Wait for the running turn to finish.".into()),
+        None => Ok(()),
     }
 }
 
@@ -507,12 +502,10 @@ pub async fn turn_undo(
     revert_anyway: Vec<String>,
 ) -> Res<turns::UndoOutcome> {
     let p = project(&state, &project_id)?;
-    let pane = open_pane_turn(&state, &p).await?;
-    let out = turns::undo(&p, &turn_id, &revert_anyway).await;
-    if let Some(pane) = pane {
-        pane.begin().await;
-    }
-    let out = out.map_err(|e| format!("{e:#}"))?;
+    ensure_free(&p)?;
+    let out = turns::undo(&p, &turn_id, &revert_anyway)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
     // Chat sessions tell the agent in the next prompt. Panes never get text typed in.
     if let Some(s) = session_of_turn(&state, &project_id, &turn_id) {
         s.note_undo(true);
@@ -527,12 +520,10 @@ pub async fn turn_redo(
     turn_id: String,
 ) -> Res<turns::UndoOutcome> {
     let p = project(&state, &project_id)?;
-    let pane = open_pane_turn(&state, &p).await?;
-    let out = turns::redo(&p, &turn_id).await;
-    if let Some(pane) = pane {
-        pane.begin().await;
-    }
-    let out = out.map_err(|e| format!("{e:#}"))?;
+    ensure_free(&p)?;
+    let out = turns::redo(&p, &turn_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
     if let Some(s) = session_of_turn(&state, &project_id, &turn_id) {
         s.note_undo(false);
     }

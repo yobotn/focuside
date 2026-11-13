@@ -426,7 +426,7 @@ mod tests {
         let tui = focuside_core::agent::tui_command("claude").expect("claude installed");
         let data = tempfile::tempdir().unwrap();
         let helper = crate::hooks::helper_path().expect("focuside-hook built");
-        let plugin = crate::hooks::ensure_plugin(data.path(), &helper).unwrap();
+        let plugin = crate::hooks::ensure_plugin(data.path(), &helper, false).unwrap();
         let events = data.path().join("events");
         std::fs::create_dir_all(&events).unwrap();
         let launch = crate::pane::launch_for(tui, &events, Some(&plugin));
@@ -435,6 +435,161 @@ mod tests {
         tui_starts_and_closes(launch, dir.path());
         // No prompt was typed, so no hook ran.
         assert!(crate::pane::take_events(&events).is_empty());
+    }
+
+    /// Status line texts of Claude Code's permission modes (Claude Code 2.1.x, permission
+    /// modes docs) and the mode names hooks report.
+    const MODES: &[(&str, &str)] = &[
+        ("plan mode on", "plan"),
+        ("accept edits on", "acceptEdits"),
+        ("auto mode on", "auto"),
+        ("manual mode on", "default"),
+        ("bypass permissions on", "bypassPermissions"),
+    ];
+
+    /// The mode that the Claude TUI's status line shows, read from the bottom lines of the
+    /// rendered screen.
+    fn shown_mode(screen: &str) -> Option<&'static str> {
+        // The lowest status line wins: the classic renderer can leave older ones above it.
+        screen.lines().rev().take(8).find_map(|line| {
+            MODES
+                .iter()
+                .find(|(s, _)| line.contains(s))
+                .map(|(_, m)| *m)
+        })
+    }
+
+    /// The real Claude TUI in a PTY, drawn into a vt100 screen. Cursor position requests are
+    /// answered as xterm.js does. Runs in this repo, a folder Claude already trusts, so no
+    /// trust question shows.
+    struct ClaudeScreen {
+        pty: Pty,
+        screen: Arc<Mutex<vt100::Parser>>,
+        asks: Arc<std::sync::atomic::AtomicUsize>,
+        answered: usize,
+    }
+
+    impl ClaudeScreen {
+        fn start(launch: Launch) -> Self {
+            let cwd = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+            let screen = Arc::new(Mutex::new(vt100::Parser::new(40, 120, 0)));
+            let asks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (screen2, asks2) = (screen.clone(), asks.clone());
+            let pty = spawn(
+                &launch,
+                &cwd,
+                120,
+                40,
+                None,
+                move |b| {
+                    let n = String::from_utf8_lossy(b).matches("\x1b[6n").count();
+                    asks2.fetch_add(n, Ordering::Relaxed);
+                    screen2.lock().unwrap().process(b);
+                },
+                || {},
+            )
+            .expect("spawn");
+            Self {
+                pty,
+                screen,
+                asks,
+                answered: 0,
+            }
+        }
+
+        /// Waits until the screen shows `text`, at most `ms`. Returns the screen text.
+        fn wait_for(&mut self, text: &str, ms: u64) -> String {
+            let mut screen = String::new();
+            for _ in 0..ms / 200 {
+                screen = self.wait(200);
+                if screen.contains(text) {
+                    break;
+                }
+            }
+            screen
+        }
+
+        /// Waits `ms`, then returns the screen text.
+        fn wait(&mut self, ms: u64) -> String {
+            for _ in 0..ms / 100 {
+                std::thread::sleep(Duration::from_millis(100));
+                while self.answered < self.asks.load(Ordering::Relaxed) {
+                    self.pty.write(b"\x1b[1;1R").unwrap();
+                    self.answered += 1;
+                }
+            }
+            self.screen.lock().unwrap().screen().contents()
+        }
+    }
+
+    /// The pane's mode button on the real Claude TUI: starts `claude --permission-mode plan`,
+    /// sends the Shift+Tab key sequence (ESC [Z) four times and reads the mode from the
+    /// rendered status line after each press. Only the mode key is sent: no prompt, no Enter.
+    /// `cargo test -p focuside-desktop -- --ignored real_claude_mode_key --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_claude_mode_key() {
+        let mut tui = focuside_core::agent::tui_command("claude").expect("claude installed");
+        tui.start_in_plan_mode("claude");
+        let mut c = ClaudeScreen::start(Launch {
+            program: tui.program.to_string_lossy().to_string(),
+            args: tui.args.clone(),
+            env: vec![],
+        });
+        c.wait_for("shift+tab to cycle", 30000);
+        // The status line shows before the TUI reads keys.
+        let first = shown_mode(&c.wait(2000));
+        println!("at start: {first:?}");
+        assert_eq!(first, Some("plan"), "started in plan mode");
+        let mut seen = vec![];
+        for _ in 0..4 {
+            c.pty.write(crate::pane::MODE_KEY).unwrap();
+            let m = shown_mode(&c.wait(1500));
+            println!("after Shift+Tab: {m:?}");
+            seen.push(m);
+        }
+        assert!(
+            seen[0].is_some_and(|m| m != "plan"),
+            "Shift+Tab left plan mode: {seen:?}"
+        );
+        assert!(
+            seen.contains(&Some("plan")),
+            "the cycle came back to plan mode: {seen:?}"
+        );
+    }
+
+    /// Brief replies: starts the Claude TUI with the `focuside-brief` plugin, runs the local
+    /// `/output-style` command with no argument (it lists the styles; nothing goes to the
+    /// model and nothing is selected), checks that the plugin style is loaded, and closes the
+    /// list with Esc. The list marks the `outputStyle` setting as current, not the forced plugin
+    /// style; in Claude Code 2.1.323 the system prompt takes a plugin style with
+    /// `force-for-plugin` before that setting. Needs the built helper:
+    /// `cargo test -p focuside-desktop -- --ignored real_claude_brief_style --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_claude_brief_style() {
+        let tui = focuside_core::agent::tui_command("claude").expect("claude installed");
+        let data = tempfile::tempdir().unwrap();
+        let helper = crate::hooks::helper_path().expect("focuside-hook built");
+        let plugin = crate::hooks::ensure_plugin(data.path(), &helper, true).unwrap();
+        let events = data.path().join("events");
+        let launch = crate::pane::launch_for(tui, &events, Some(&plugin));
+        let mut c = ClaudeScreen::start(launch);
+        // The status line is the last thing the TUI draws at start.
+        c.wait_for("shift+tab to cycle", 30000);
+        c.wait(1000);
+        c.pty.write(b"/output-style").unwrap();
+        let typed = c.wait_for("/output-style", 5000);
+        assert!(typed.contains("/output-style"), "the TUI took the command");
+        c.pty.write(b"\r").unwrap();
+        let text = c.wait_for("brief replies", 5000);
+        println!("{text}");
+        c.pty.write(b"\x1b").unwrap();
+        c.wait(500);
+        assert!(
+            text.contains("focuside:FocusIDE brief replies"),
+            "the brief style is loaded as a plugin style"
+        );
     }
 
     fn tui_starts_and_closes(launch: Launch, cwd: &std::path::Path) {
