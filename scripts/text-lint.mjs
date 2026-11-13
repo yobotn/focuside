@@ -5,7 +5,8 @@ import { join, relative, extname } from "node:path";
 
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const exts = new Set([".rs", ".ts", ".js", ".mjs", ".svelte", ".html", ".css", ".md", ".toml", ".json", ".ps1", ".yml"]);
-const skip = new Set(["node_modules", "target", "dist", "gen", ".git", ".dev-data", "icons", "binaries", "generated"]);
+// .claude: local agent settings and worktrees (other checkouts of this repo), not product text.
+const skip = new Set(["node_modules", "target", "dist", "gen", ".git", ".claude", ".dev-data", "icons", "binaries", "generated"]);
 const banned = [
   { re: new RegExp(String.fromCharCode(0x2014), "g"), why: "em dash" },
   { re: /\p{Extended_Pictographic}/gu, why: "emoji" },
