@@ -634,6 +634,32 @@ Not verified:
 
 Not done in Phase 3: delivery Option B (marketplace plugin); the "Update the focuside plugin" notice (Option A ships plugin and app together, so FocusIDE does not check `v` yet); keeping the summary in `turns.json` (it lives in the session's cards only).
 
+### More agents (Phase 4, 2026-11-13)
+
+Phase 4 of [docs/agent-terms.md](docs/agent-terms.md): seven more agents, per-agent data and terms notes, and a monthly registry check. Each launch command was checked on 2026-11-13 against the [ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json) and the vendor docs. None of the new agents is installed on this machine, so none was run.
+
+| Agent | Chat mode | Pane | Install hint | Checked against | Status |
+|---|---|---|---|---|---|
+| Antigravity CLI | `agy acp` | `agy` | antigravity.google/docs/install (script installer) | [Antigravity CLI ACP](https://antigravity.google/docs/cli/acp.md) ("agy acp [flags]", sign in with `agy` or `agy acp --login`). The registry entry `antigravity-acp` is a different program, `agy_acp_server` from the IDE extensions | Verified in docs; registry differs on purpose |
+| Copilot CLI | `copilot --acp` | `copilot` | `npm install -g @github/copilot` | Registry `github-copilot-cli`, [GitHub ACP server reference](https://docs.github.com/en/copilot/reference/acp-server) (public preview, stdio default), npm bin `copilot`, GitHub install page | Verified |
+| Cursor CLI | `cursor-agent acp` | `cursor-agent` | cursor.com/docs/cli/installation (script installer) | Registry `cursor` (`cursor-agent acp`), [Cursor ACP](https://cursor.com/docs/cli/acp) (`agent acp`), cursor.com/install (creates `agent` and `cursor-agent`) | Verified. Unverified: starting the Windows `cursor-agent.cmd`, which runs a PowerShell script, as a child process and in a PTY |
+| Kiro CLI | `kiro-cli acp` | `kiro-cli` | kiro.dev/docs/getting-started/installation/ | [Kiro ACP](https://kiro.dev/docs/cli/acp/), [Kiro CLI setup](https://kiro.dev/docs/cli/setup/) ("run `kiro-cli`. The terminal UI opens") | Verified. The registry adds `--agent-engine=v3`, which overrides the user's saved setting, so FocusIDE leaves it out. The registry has no Windows build; Kiro lists Windows 11. Windows launch unverified |
+| Cline | `cline --acp` | `cline` | `npm install -g cline` | Registry `cline`, [Cline ACP docs](https://docs.cline.bot/cline-cli/acp-editor-integrations), Cline CLI overview (`cline` with no arguments is interactive), npm bin `cline` | Verified |
+| Kimi Code | `kimi acp` | `kimi` | `npm install -g @moonshot-ai/kimi-code` | Registry `kimi-code` (npx package with `acp`), npm bin `kimi`, [Kimi Code site](https://moonshotai.github.io/kimi-code/) (`kimi` starts a conversation) | ACP flag verified in the registry only; the vendor site does not document ACP. The legacy Kimi CLI used the same `kimi` name |
+| Mistral Vibe | `vibe-acp` | `vibe` | `uv tool install mistral-vibe` | Registry `mistral-vibe`, [README](https://github.com/mistralai/mistral-vibe) and `pyproject.toml` (scripts `vibe` and `vibe-acp`) | Verified |
+
+| Decision | Why |
+|---|---|
+| Install hints are plain commands or the vendor's install page. Script installers (a curl or irm command piped to a shell) are not copied into the app | FocusIDE never installs an agent. The page shows the right script for each OS |
+| Antigravity CLI opens in a pane by default. Chat mode shows a one-time note: "Google's terms on third-party apps are unclear for personal Google accounts. An API key or an enterprise login is the safer path." The user picks "Use chat mode" or "Open a pane instead". The answer is kept in `settings.chatConfirmed` | The report says consumer logins in chat mode wait for Google's written answer. FocusIDE cannot read the login, so it cannot gate on it; the user decides with the facts in front of them |
+| Gemini CLI is unchanged; its note says Login with Google stopped working for personal accounts on June 18, 2026 | Confirmed in docs/agent-terms.md |
+| One data or terms line per agent in Settings (under Default agent) and in the new session menu and palette (as the item detail). Lines exist only for facts marked Confirmed in "Data use per auth mode": Claude, Copilot, Cursor, Kiro, Gemini CLI, Antigravity (terms only). OpenCode, Goose, Qwen Code, Cline, Kimi Code and Mistral Vibe share "This agent uses the provider you set up in it. That provider's terms apply." Codex has no line (its data use is Unverified) | Users cannot see training defaults from FocusIDE, and FocusIDE must not read their settings |
+| No Antigravity data-use line | "Data use per auth mode" has no Confirmed row for Antigravity |
+| `scripts/check-agents.mjs` compares every `AgentSpec` with the registry and prints differences. Known differences (Claude adapter, Antigravity, Kiro) are listed in the script. `--strict` exits 1 on an unknown difference. The "Agent commands" workflow runs it monthly and on demand and only reports; CI does not run it on push (network) | Vendor CLIs update on their own |
+| Windows npm shims that point at an `.mjs` file or an extensionless node script now resolve to `node <script>` (`which::is_node_script`) | Kimi Code's bin is `dist/main.mjs` and Cline's is `bin/cline` with a node shebang; before this, both stayed as `.cmd` paths |
+
+Not done in Phase 4: running any new agent live on Windows (none installed); hook names for Antigravity, Copilot, Cursor and Kiro panes (they use Checkpoint); Cursor's `cursor/create_plan` and `cursor/update_todos` ACP extensions in the plan card; a "Preview" badge for Copilot beyond its note line; reading versions or install hints from the registry at run time.
+
 ## 11. Open items
 
 1. Owner says go to create the public repo `yobotn/focuside` and push.

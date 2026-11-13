@@ -220,6 +220,8 @@ Status (2026-11-13): done with delivery Option A. Decisions, checks and open poi
 
 ### Phase 4: more agents and registry
 
+Status (2026-11-13): done. Antigravity CLI opens in a pane by default and asks once before chat mode, because FocusIDE cannot read the login. Commands, verification per agent and open points are in PLAN.md, section 10, "More agents (Phase 4, 2026-11-13)". The live check on Windows is still open.
+
 Add `AgentSpec` entries for Antigravity, Copilot, Cursor, Kiro, Cline, Kimi Code and Mistral Vibe. Antigravity with a consumer login stays off until Google answers; API key logins can ship first. Vendor CLIs update on their own, so add a monthly check (manual or CI) of each launch flag and hook name against the vendor docs. Optionally read the ACP registry JSON for versions and install hints, but never auto-install proprietary entries. Add per-agent one-line data and terms notes in `en.ts`. Check each agent live on Windows, since `PLAN.md:516` records that none of the non-Claude agents were run.
 
 ### PLAN.md decisions that need a new row in section 10
