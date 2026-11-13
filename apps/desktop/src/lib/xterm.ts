@@ -32,8 +32,11 @@ export function newTerminal(scrollback = 5000): Terminal {
     theme: termColors(),
     scrollback,
   });
-  // Ctrl+Tab and Ctrl+Shift+Tab switch sessions. xterm.js would send them as Tab and stop the
-  // event, so it skips them and they reach the app. Shift+Tab alone still goes to the program.
-  term.attachCustomKeyEventHandler((e) => !(e.ctrlKey && e.key === "Tab"));
+  // Ctrl+Tab and Ctrl+Shift+Tab switch sessions, Ctrl+Shift+Page Up and Page Down move the
+  // active session tab. xterm.js would send them to the program and stop the event, so it skips
+  // them and they reach the app. Shift+Tab and Shift+Page Up alone still go to the terminal.
+  term.attachCustomKeyEventHandler(
+    (e) => !(e.ctrlKey && e.key === "Tab") && !(e.ctrlKey && e.shiftKey && (e.key === "PageUp" || e.key === "PageDown")),
+  );
   return term;
 }

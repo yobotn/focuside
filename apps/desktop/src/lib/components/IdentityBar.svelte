@@ -4,6 +4,7 @@
   import { keyLabel } from "../platform";
   import { app } from "../stores/app.svelte";
   import { updates } from "../updates.svelte";
+  import { reorder } from "../reorder";
   import SessionTab from "./SessionTab.svelte";
 
   function restart() {
@@ -21,7 +22,7 @@
   let input: HTMLInputElement | undefined = $state();
   let width = $state(1000);
   let strip: HTMLDivElement | undefined = $state();
-  // Session tabs: Top shows every session here; Side lists them in the side panel.
+  // Session tabs in the top bar: on shows every session here. The side bar always lists them too.
   const top = $derived(app.settings.sessionTabs !== "side");
 
   // The active tab stays in view when the strip scrolls.
@@ -68,7 +69,7 @@
     {/if}
     <span class="sep">.</span>
     {#if top}
-      <div class="strip" role="tablist" aria-label={t("session.list")} bind:this={strip}>
+      <div class="strip" role="tablist" aria-label={t("session.list")} bind:this={strip} {@attach reorder("x", (key, i) => app.moveSession(key, i))}>
         {#each p.sessions as x (x.key)}
           <SessionTab session={x} active={x.key === s?.key} closable={p.sessions.length > 1} />
         {/each}

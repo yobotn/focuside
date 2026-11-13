@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { ArrowsLeftRight, CaretDown, CaretRight, PushPin } from "phosphor-svelte";
+  import { CaretDown, CaretRight, PushPin } from "phosphor-svelte";
   import { t } from "../i18n";
   import { invalidate } from "../files.svelte";
   import { app, type Project } from "../stores/app.svelte";
@@ -15,8 +15,8 @@
     ignored: boolean;
   }
 
-  // `head`: false when the side panel draws its own header (Session tabs: Side).
-  let { project, head = true }: { project: Project; head?: boolean } = $props();
+  // The side bar (SidePanel) draws the header.
+  let { project }: { project: Project } = $props();
 
   let children = $state<Record<string, Node[]>>({});
   let expanded = $state<Record<string, boolean>>({});
@@ -116,20 +116,7 @@
   const viewing = $derived(app.viewer?.kind === "file" ? app.viewer.path : null);
 </script>
 
-<aside class="files">
-  {#if head}
-    <div class="head">
-      <span class="flex-1">{t("files.title")}</span>
-      <button
-        class="icon-btn move"
-        onclick={() => app.movePanel("files")}
-        title={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
-        aria-label={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
-      >
-        <ArrowsLeftRight size={12} />
-      </button>
-    </div>
-  {/if}
+<div class="files">
   {#if pinned}
     <button class="row pinned" class:on={viewing === pinned.path} onclick={() => open(pinned)}>
       <PushPin size={12} class="shrink-0 text-fg-faint" />
@@ -169,16 +156,9 @@
       </button>
     {/each}
   </div>
-</aside>
+</div>
 
 <style>
-  .move {
-    opacity: 0;
-  }
-  .files:hover .move,
-  .move:focus-visible {
-    opacity: 1;
-  }
   .files {
     width: 100%;
     height: 100%;
@@ -186,19 +166,6 @@
     flex-direction: column;
     background: var(--bg-subtle);
     min-height: 0;
-  }
-  .head {
-    height: 40px;
-    display: flex;
-    align-items: center;
-    padding: 0 6px 0 12px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--fg-muted);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
   }
   .tree {
     flex: 1;

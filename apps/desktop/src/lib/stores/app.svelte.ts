@@ -21,6 +21,7 @@ import type { Entry, ProjectInfo, UndoOutcome, Waiting } from "../types";
 import { Session, type SavedSession, type SessionMode } from "./session.svelte";
 import { paneTerms } from "./paneterm.svelte";
 import { applyTheme, type Theme } from "../theme.svelte";
+import { DEFAULT_BOTTOM, defaultDock, legacyDock, normalizeDock, type Dock } from "../dock";
 import { updates } from "../updates.svelte";
 
 export interface Settings {
@@ -37,7 +38,8 @@ export interface Settings {
   /** Turn tracking in Claude panes: start them with the focuside plugin (--plugin-dir). On by
    * default. v0.2.0 stored null before its one-time question; null counts as on. */
   claudeHooks: boolean;
-  /** Where the session tabs are: a strip in the identity bar, or a list in the side panel. */
+  /** Session tabs in the top bar: "top" shows the strip, "side" hides it. The Sessions view of
+   * the side bar always lists them. */
   sessionTabs: SessionTabs;
   /** Agent ids whose chat mode the user confirmed once after a terms note (see CHAT_CONFIRM). */
   chatConfirmed: string[];
@@ -58,31 +60,34 @@ export function agentNote(id: string): string {
   return key in en ? t(key as Key) : "";
 }
 
-export type Side = "left" | "right";
 export type SessionTabs = "top" | "side";
 
-/** Panel sizes and sides. Widths in pixels. */
+/** Panel places and sizes. The dock holds the side bar, viewer, plan and terminal (see lib/dock.ts). */
 export interface Layout {
-  filesWidth: number;
-  viewerWidth: number;
-  terminalHeight: number;
-  filesSide: Side;
-  viewerSide: Side;
-  /** The side panel view when session tabs are on the side. */
+  dock: Dock;
+  /** Height of the bottom zone in pixels. */
+  bottomHeight: number;
+  /** The side bar view: the file tree or the session list. */
   sideView: "files" | "sessions";
   /** The Turns column beside an agent pane. */
   turnsVisible: boolean;
 }
 
-export const defaultLayout: Layout = {
-  filesWidth: 248,
-  viewerWidth: 640,
-  terminalHeight: 260,
-  filesSide: "left",
-  viewerSide: "right",
-  sideView: "files",
-  turnsVisible: true,
-};
+export function defaultLayout(): Layout {
+  return { dock: defaultDock(), bottomHeight: DEFAULT_BOTTOM, sideView: "files", turnsVisible: true };
+}
+
+/** A saved layout, including one saved before docking (filesSide, viewerSide, terminalHeight). */
+function loadLayout(raw: Record<string, unknown> | undefined): Layout {
+  const out = defaultLayout();
+  if (!raw) return out;
+  out.dock = normalizeDock(raw.dock) ?? legacyDock(raw);
+  const h = raw.bottomHeight ?? raw.terminalHeight;
+  if (typeof h === "number" && h >= 120) out.bottomHeight = h;
+  if (raw.sideView === "sessions") out.sideView = "sessions";
+  if (raw.turnsVisible === false) out.turnsVisible = false;
+  return out;
+}
 
 interface Persisted {
   recent: { path: string; name: string; opened: number }[];
@@ -105,7 +110,7 @@ const defaults: Persisted = {
   history: [],
   settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, sessionTabs: "top", chatConfirmed: [] },
   filesVisible: true,
-  layout: { ...defaultLayout },
+  layout: defaultLayout(),
 };
 
 export interface Project extends ProjectInfo {
@@ -135,8 +140,10 @@ class AppStore {
   savedSessions = $state<Record<string, SavedSession[]>>({});
   settings = $state<Settings>({ ...defaults.settings });
   filesVisible = $state(true);
-  layout = $state<Layout>({ ...defaultLayout });
+  layout = $state<Layout>(defaultLayout());
   terminalVisible = $state(false);
+  /** The Plan panel. Opens when a plan arrives; not kept between runs. */
+  planVisible = $state(false);
   terminalCommand = $state<string | null>(null);
   focused = $state(true);
   toast = $state<{ text: string; tone: "muted" | "error" } | null>(null);
@@ -196,7 +203,7 @@ class AppStore {
       if (typeof this.settings.claudeHooks !== "boolean") this.settings.claudeHooks = true;
       if (this.settings.sessionTabs !== "side") this.settings.sessionTabs = "top";
       this.filesVisible = st.filesVisible;
-      this.layout = { ...defaultLayout, ...(raw?.layout ?? {}) };
+      this.layout = loadLayout(raw?.layout as Record<string, unknown> | undefined);
       applyTheme(this.settings.theme);
       document.documentElement.style.setProperty("--read-size", `${this.settings.fontSize}px`);
       this.env = await api.envCheck();
@@ -228,15 +235,8 @@ class AppStore {
     updates.start(this.settings.autoUpdate);
   }
 
-  /** Moves a panel to the other side of the conversation. */
-  movePanel(panel: "files" | "viewer") {
-    const key = panel === "files" ? "filesSide" : "viewerSide";
-    this.layout[key] = this.layout[key] === "left" ? "right" : "left";
-    this.save();
-  }
-
   resetLayout() {
-    this.layout = { ...defaultLayout };
+    this.layout = defaultLayout();
     this.save();
   }
 
@@ -263,6 +263,12 @@ class AppStore {
         if (i >= 0) list[i] = saved;
         else list.unshift(saved);
       }
+      // Open sessions keep their tab order in the saved list. They swap places among
+      // themselves, so the other entries stay where they are.
+      const ids = p.sessions.map((s) => s.acpId).filter((id) => !!id);
+      const slots = list.map((x, i) => (ids.includes(x.acpId) ? i : -1)).filter((i) => i >= 0);
+      const ordered = slots.map((i) => list[i]).sort((a, b) => ids.indexOf(a.acpId) - ids.indexOf(b.acpId));
+      slots.forEach((at, n) => (list[at] = ordered[n]));
       this.savedSessions[p.root] = list.slice(0, 100);
     }
     const st: Persisted = {
@@ -517,6 +523,28 @@ class AppStore {
   showSessionAt(index: number) {
     const s = this.active?.sessions[index];
     if (s) this.showSession(s.key);
+  }
+
+  /** Moves a session tab to another place in the tabs of its project. */
+  moveSession(key: string, index: number) {
+    const p = this.projects.find((x) => x.sessions.some((s) => s.key === key));
+    if (!p) return;
+    const from = p.sessions.findIndex((s) => s.key === key);
+    const to = Math.max(0, Math.min(p.sessions.length - 1, index));
+    if (from === to) return;
+    const list = [...p.sessions];
+    const [s] = list.splice(from, 1);
+    list.splice(to, 0, s);
+    p.sessions = list;
+    this.save();
+  }
+
+  /** Ctrl+Shift+Page Up and Page Down: moves the active tab one place. */
+  moveActiveSession(step: 1 | -1) {
+    const p = this.active;
+    if (!p?.activeKey) return;
+    const i = p.sessions.findIndex((s) => s.key === p.activeKey);
+    this.moveSession(p.activeKey, i + step);
   }
 
   async closeSession(key: string) {
