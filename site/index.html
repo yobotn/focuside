@@ -74,7 +74,7 @@
       "codeRepository": "https://github.com/yobotn/focuside",
       "screenshot": "https://yobotn.github.io/focuside/assets/screenshot.png",
       "image": "https://yobotn.github.io/focuside/assets/og.png",
-      "softwareRequirements": "An ACP coding agent such as Claude Code, Codex or Gemini CLI, installed and set up by the user (Claude Code chat mode with an API key or a cloud provider; with a Claude plan, Claude runs in the terminal). Git.",
+      "softwareRequirements": "An ACP coding agent such as Claude Code, Codex or Gemini CLI, installed and set up by the user (Claude Code chat mode with an API key or a cloud provider; with a Claude plan, Claude opens in a Claude pane). Git.",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "author": { "@id": "https://yobotn.github.io/focuside/#publisher" },
       "publisher": { "@id": "https://yobotn.github.io/focuside/#publisher" },
@@ -82,7 +82,7 @@
         "Plan card before any file changes: at most 6 steps, every file, one line of risk",
         "Scope guard: files changed outside the plan show live in amber with Pause",
         "Undo turn: restore the project byte for byte to how it was before the turn",
-        "Works with Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose and any ACP agent",
+        "Works with Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose, Antigravity CLI, Copilot CLI, Cursor CLI, Kiro CLI, Cline, Kimi Code, Mistral Vibe and any ACP agent",
         "Waiting queue across projects",
         "Diff viewer, file tree, fuzzy file picker, project search, terminal",
         "Markdown files render as documents",
@@ -97,7 +97,7 @@
       "totalTime": "PT5M",
       "tool": [{ "@type": "HowToTool", "name": "An ACP coding agent, for example Claude Code" }, { "@type": "HowToTool", "name": "Git" }],
       "step": [
-        { "@type": "HowToStep", "position": 1, "name": "Install your agent", "text": "Install the agent you want to use. For Claude Code: npm install -g @anthropic-ai/claude-code, then set ANTHROPIC_API_KEY from the Claude Console, or set up Amazon Bedrock, Google Vertex AI or Microsoft Foundry, for chat mode. With a Claude plan, run claude in the terminal." },
+        { "@type": "HowToStep", "position": 1, "name": "Install your agent", "text": "Install the agent you want to use. For Claude Code: npm install -g @anthropic-ai/claude-code, then set ANTHROPIC_API_KEY from the Claude Console, or set up Amazon Bedrock, Google Vertex AI or Microsoft Foundry, for chat mode. With a Claude plan, Claude opens in a Claude pane." },
         { "@type": "HowToStep", "position": 2, "name": "Install FocusIDE", "text": "Download the Windows installer from the latest GitHub release and run it.", "url": "https://github.com/yobotn/focuside/releases/latest" },
         { "@type": "HowToStep", "position": 3, "name": "Open a folder", "text": "Open your project folder. Any folder works, git repo or not." },
         { "@type": "HowToStep", "position": 4, "name": "Ask for a change", "text": "Type what you want with Plan first on. The agent answers with a plan card that lists its steps and every file it will touch." },
@@ -110,7 +110,7 @@
       "mainEntity": [
         { "@type": "Question", "name": "What is FocusIDE?", "acceptedAnswer": { "@type": "Answer", "text": "FocusIDE is a free, open source desktop app for working with AI coding agents. The conversation with the agent is the center of the window. It shows a plan before any file changes, marks files the agent changes outside the plan, and can undo a whole turn with one key." } },
         { "@type": "Question", "name": "Is FocusIDE free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. FocusIDE is free and open source under the GPL 3.0 license. You pay only for your agent, under your own plan with its provider." } },
-        { "@type": "Question", "name": "Which AI agents does FocusIDE work with?", "acceptedAnswer": { "@type": "Answer", "text": "Claude Code chat mode works with an API key or a cloud provider. With a Claude plan, run Claude in the terminal. Codex, Gemini CLI, OpenCode, Qwen Code and Goose work when installed. Any other agent that speaks the Agent Client Protocol (ACP) works through a custom command." } },
+        { "@type": "Question", "name": "Which AI agents does FocusIDE work with?", "acceptedAnswer": { "@type": "Answer", "text": "Claude Code chat mode works with an API key or a cloud provider. With a Claude plan, Claude opens in a Claude pane. Codex, Gemini CLI, OpenCode, Qwen Code, Goose, Antigravity CLI, Copilot CLI, Cursor CLI, Kiro CLI, Cline, Kimi Code and Mistral Vibe work when installed. Any other agent that speaks the Agent Client Protocol (ACP) works through a custom command." } },
         { "@type": "Question", "name": "Does FocusIDE see my code or my credentials?", "acceptedAnswer": { "@type": "Answer", "text": "No. FocusIDE has no server, no account and no telemetry. It runs on your machine and starts the agent you installed. It never reads, stores or proxies agent credentials. The agent talks to its own provider exactly as it does in your terminal." } },
         { "@type": "Question", "name": "Does my project need to be a git repo?", "acceptedAnswer": { "@type": "Answer", "text": "No. Undo turn keeps snapshots in a separate private git repo inside the app's data folder. Your own repo, branches and history are never touched." } },
         { "@type": "Question", "name": "How does Undo turn work?", "acceptedAnswer": { "@type": "Answer", "text": "Before each turn, FocusIDE takes a snapshot of the project. Undo turn restores every file the agent changed to its exact bytes from that snapshot and removes files the agent created. Files you saved yourself during the turn are kept by default." } },
@@ -354,6 +354,13 @@
       <li><svg class="ic"><use href="#i-terminal"/></svg>OpenCode</li>
       <li><svg class="ic"><use href="#i-terminal"/></svg>Qwen Code</li>
       <li><svg class="ic"><use href="#i-terminal"/></svg>Goose</li>
+      <li><svg class="ic"><use href="#i-terminal"/></svg>Antigravity CLI</li>
+      <li><svg class="ic"><use href="#i-terminal"/></svg>Copilot CLI</li>
+      <li><svg class="ic"><use href="#i-terminal"/></svg>Cursor CLI</li>
+      <li><svg class="ic"><use href="#i-terminal"/></svg>Kiro CLI</li>
+      <li><svg class="ic"><use href="#i-terminal"/></svg>Cline</li>
+      <li><svg class="ic"><use href="#i-terminal"/></svg>Kimi Code</li>
+      <li><svg class="ic"><use href="#i-terminal"/></svg>Mistral Vibe</li>
       <li class="any"><svg class="ic"><use href="#i-plug"/></svg>Any ACP agent</li>
     </ul>
     <aside class="callout" aria-label="Claude chat mode and Claude plans">
@@ -383,7 +390,7 @@
     <div class="faq">
       <details><summary>What is FocusIDE?<svg class="ic"><use href="#i-chevron"/></svg></summary><p>FocusIDE is a free, open source desktop app for working with AI coding agents. The conversation with the agent is the center of the window. It shows a plan before any file changes, marks files the agent changes outside the plan, and can undo a whole turn with one key.</p></details>
       <details><summary>Is FocusIDE free?<svg class="ic"><use href="#i-chevron"/></svg></summary><p>Yes. FocusIDE is free and open source under the GPL 3.0 license. You pay only for your agent, under your own plan with its provider.</p></details>
-      <details><summary>Which AI agents does FocusIDE work with?<svg class="ic"><use href="#i-chevron"/></svg></summary><p>Claude Code chat mode works with an API key or a cloud provider. With a Claude plan, run Claude in the terminal. Codex, Gemini CLI, OpenCode, Qwen Code and Goose work when installed. Any other agent that speaks the Agent Client Protocol (ACP) works through a custom command.</p></details>
+      <details><summary>Which AI agents does FocusIDE work with?<svg class="ic"><use href="#i-chevron"/></svg></summary><p>Claude Code chat mode works with an API key or a cloud provider. With a Claude plan, Claude opens in a Claude pane. Codex, Gemini CLI, OpenCode, Qwen Code, Goose, Antigravity CLI, Copilot CLI, Cursor CLI, Kiro CLI, Cline, Kimi Code and Mistral Vibe work when installed. Any other agent that speaks the Agent Client Protocol (ACP) works through a custom command.</p></details>
       <details><summary>Does FocusIDE see my code or my credentials?<svg class="ic"><use href="#i-chevron"/></svg></summary><p>No. FocusIDE has no server, no account and no telemetry. It runs on your machine and starts the agent you installed. It never reads, stores or proxies agent credentials. The agent talks to its own provider exactly as it does in your terminal.</p></details>
       <details><summary>Does my project need to be a git repo?<svg class="ic"><use href="#i-chevron"/></svg></summary><p>No. Undo turn keeps snapshots in a separate private git repo inside the app's data folder. Your own repo, branches and history are never touched.</p></details>
       <details><summary>How does Undo turn work?<svg class="ic"><use href="#i-chevron"/></svg></summary><p>Before each turn, FocusIDE takes a snapshot of the project. Undo turn restores every file the agent changed to its exact bytes from that snapshot and removes files the agent created. Files you saved yourself during the turn are kept by default.</p></details>
@@ -416,7 +423,7 @@
       </div>
     </div>
     <ol class="start">
-      <li><span class="n">1</span><div>Install your agent. For Claude Code: <code>npm install -g @anthropic-ai/claude-code</code>, then set <code>ANTHROPIC_API_KEY</code> from the Claude Console (or use a cloud provider) for chat mode. With a Claude plan, run <code>claude</code> in the terminal.</div></li>
+      <li><span class="n">1</span><div>Install your agent. For Claude Code: <code>npm install -g @anthropic-ai/claude-code</code>, then set <code>ANTHROPIC_API_KEY</code> from the Claude Console (or use a cloud provider) for chat mode. With a Claude plan, Claude opens in a Claude pane.</div></li>
       <li><span class="n">2</span><div><a href="https://github.com/yobotn/focuside/releases/latest">Download FocusIDE</a> and run the installer.</div></li>
       <li><span class="n">3</span><div>Open a folder, ask for a change, and press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> on the plan.</div></li>
     </ol>

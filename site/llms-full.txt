@@ -61,14 +61,21 @@ Several projects stay open in a rail on the left, each with several sessions. A 
 | OpenCode | `opencode acp` |
 | Qwen Code | `qwen --acp --experimental-skills` |
 | Goose | `goose acp` |
+| Antigravity CLI | `agy acp`. Opens in a pane by default. Chat mode asks once first, because Google's terms on third-party apps are unclear for personal Google accounts |
+| Copilot CLI | `copilot --acp` (`npm install -g @github/copilot`). ACP mode is a GitHub preview |
+| Cursor CLI | `cursor-agent acp` |
+| Kiro CLI | `kiro-cli acp` |
+| Cline | `cline --acp` (`npm install -g cline`) |
+| Kimi Code | `kimi acp` (`npm install -g @moonshot-ai/kimi-code`) |
+| Mistral Vibe | `vibe-acp` (`uv tool install mistral-vibe`) |
 | Custom command | Any command line that speaks ACP over stdio. Leading NAME=value parts set environment variables |
 
-Settings shows which agents are installed. The command palette offers "New session with <agent>" for each installed agent. Each session remembers its agent, so resuming it uses the same one. Plan first is turned off for agents that do not report a plan mode; those prompts run directly, and Undo turn still works.
+Settings shows which agents are installed, and one line per agent about data use or terms. FocusIDE never installs an agent. The command palette offers "New session with <agent>" for each installed agent. Each session remembers its agent, so resuming it uses the same one. Plan first is turned off for agents that do not report a plan mode; those prompts run directly, and Undo turn still works.
 
 ## Requirements
 
 - Windows 10 or 11 (x64) for the installer.
-- An agent, installed and set up by the user. For Claude Code: `npm install -g @anthropic-ai/claude-code`, plus `ANTHROPIC_API_KEY` or a cloud provider for chat mode. With a Claude plan, run `claude` in the terminal (see above).
+- An agent, installed and set up by the user. For Claude Code: `npm install -g @anthropic-ai/claude-code`, plus `ANTHROPIC_API_KEY` or a cloud provider for chat mode. With a Claude plan, Claude opens in a Claude pane (see above).
 - Git on PATH. Undo turn uses it for snapshots.
 
 ## Getting started
@@ -141,7 +148,7 @@ A free, open source desktop app for working with AI coding agents. It shows a pl
 Yes, GPL 3.0. You pay only for your agent, under your own plan with its provider.
 
 **Which AI agents does it work with?**
-Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose, and any ACP agent through a custom command.
+Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose, Antigravity CLI, Copilot CLI, Cursor CLI, Kiro CLI, Cline, Kimi Code, Mistral Vibe, and any ACP agent through a custom command.
 
 **Does FocusIDE see my code or credentials?**
 No. It runs locally, has no server, and never reads, stores or proxies credentials.

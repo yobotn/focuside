@@ -45,7 +45,7 @@
 | 🛡️ **Scope guard** | While the agent works, any file it touches outside the plan shows up live in amber, with a **Pause** button. You see scope creep when it happens, not after. |
 | ⏪ **Undo turn** | Every turn starts with a snapshot. One key puts the project back exactly as it was, byte for byte. Works in any folder, git repo or not, and never touches your git history. |
 | 🗂️ **One window, every project** | Projects live in a rail on the left. The waiting queue (<kbd>Ctrl</kbd>+<kbd>J</kbd>) jumps to the next session that needs you, across all projects. |
-| 🔌 **Bring your own agent** | Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose, or any command that speaks the [Agent Client Protocol](https://agentclientprotocol.com). |
+| 🔌 **Bring your own agent** | Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Goose, Antigravity CLI, Copilot CLI, Cursor CLI, Kiro CLI, Cline, Kimi Code, Mistral Vibe, or any command that speaks the [Agent Client Protocol](https://agentclientprotocol.com). |
 | 🔒 **Local and private** | No server, no account, no telemetry. FocusIDE never reads, stores or proxies your agent credentials. |
 
 It is not an editor with a chat box bolted on. The conversation is the center of the window. Files, diffs and the terminal are there when you need to check the work.
@@ -111,13 +111,22 @@ flowchart LR
 
 | Agent | How FocusIDE starts it | Notes |
 | :-- | :-- | :-- |
-| Claude Code | `claude-agent-acp` adapter with `--hide-claude-auth`, which runs your own `claude`. FocusIDE downloads the adapter from its GitHub release the first time you start a Claude chat session, after you agree | Chat mode: API key or cloud provider. Claude plan: run `claude` in the terminal. Full plan mode. |
+| Claude Code | `claude-agent-acp` adapter with `--hide-claude-auth`, which runs your own `claude`. FocusIDE downloads the adapter from its GitHub release the first time you start a Claude chat session, after you agree | Chat mode: API key or cloud provider. Claude plan: Claude pane. Full plan mode. |
 | Codex | `codex-acp`, from `npm install -g @agentclientprotocol/codex-acp` | Install it yourself. |
 | Gemini CLI | `gemini --acp` | Install it yourself. |
 | OpenCode | `opencode acp` | Install it yourself. |
 | Qwen Code | `qwen --acp --experimental-skills` | Install it yourself. |
 | Goose | `goose acp` | Install it yourself. |
+| Antigravity CLI | `agy acp` | Install it yourself. Opens in a pane. Chat mode asks once first, because Google's terms on third-party apps are unclear for personal Google accounts. An API key or an enterprise login is the safer path. |
+| Copilot CLI | `copilot --acp`, from `npm install -g @github/copilot` | Install it yourself. ACP mode is a GitHub preview. Sign in with `/login` in a pane. |
+| Cursor CLI | `cursor-agent acp` | Install it yourself. Sign in with `agent login`. |
+| Kiro CLI | `kiro-cli acp` | Install it yourself. Sign in with `kiro-cli login`. |
+| Cline | `cline --acp`, from `npm install -g cline` | Install it yourself. |
+| Kimi Code | `kimi acp`, from `npm install -g @moonshot-ai/kimi-code` | Install it yourself. |
+| Mistral Vibe | `vibe-acp`, from `uv tool install mistral-vibe` | Install it yourself. |
 | Anything else | **Settings > Custom command** | Any ACP agent. `NAME=value` at the start sets environment variables. |
+
+Settings and the new session menu show one line per agent about data use or terms. FocusIDE cannot see which login or setting you chose. Run `node scripts/check-agents.mjs` to compare these commands with the [ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json).
 
 Plan first needs an agent with a plan mode. Snapshots, the scope guard and Undo turn work with every agent.
 
