@@ -1,6 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "npm run build && node ../../scripts/build-hook.mjs --release"
+  },
   "bundle": {
+    "externalBin": ["binaries/focuside-hook"],
     "resources": { "../../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md" }
   }
 }

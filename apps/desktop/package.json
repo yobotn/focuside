@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "icons": "node ../../scripts/build-icons.mjs",
-    "predev": "npm run icons",
+    "predev": "npm run icons && node ../../scripts/build-hook.mjs",
     "prebuild": "npm run icons",
     "precheck": "npm run icons",
     "dev": "vite --mode development",

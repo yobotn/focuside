@@ -1,0 +1,17 @@
+[package]
+name = "focuside-hook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FocusIDE hook helper: writes agent hook events to a file, prints nothing"
+publish = false
+
+[[bin]]
+name = "focuside-hook"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
