@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { api, type HooksInfo } from "../api";
   import { t } from "../i18n";
   import { app } from "../stores/app.svelte";
   import { applyTheme, type Theme } from "../theme.svelte";
@@ -20,6 +22,17 @@
   let { onclose }: { onclose: () => void } = $props();
 
   let shellName = $state("");
+  let hooks = $state<HooksInfo | null>(null);
+  let copied = $state<string | null>(null);
+  $effect(() => {
+    api.hooksInfo().then((h) => (hooks = h)).catch(() => {});
+  });
+  // FocusIDE never writes the Codex or Gemini CLI config; the user pastes the snippet.
+  async function copy(which: "codex" | "gemini", text: string) {
+    await writeText(text).catch(() => {});
+    copied = which;
+    setTimeout(() => (copied = null), 1500);
+  }
   $effect(() => {
     app.loadAgents();
   });
@@ -140,6 +153,41 @@
       />
     </div>
 
+    <div class="hooks">
+      <h3 class="mb-2 font-semibold">{t("hooks.title")}</h3>
+      <label class="flex items-start gap-2">
+        <input
+          type="checkbox"
+          class="mt-0.5"
+          checked={app.settings.claudeHooks === true}
+          onchange={(e) => {
+            app.settings.claudeHooks = e.currentTarget.checked;
+            app.save();
+          }}
+        />
+        <span>
+          {t("hooks.claude")}
+          <span class="block text-fg-muted">{t("hooks.claudeHint")}</span>
+        </span>
+      </label>
+      {#if hooks && !hooks.helper}
+        <p class="mt-2 text-warn">{t("hooks.helperMissing")}</p>
+      {/if}
+      {#if hooks?.codex && hooks?.gemini}
+        <details class="mt-3">
+          <summary>{t("hooks.other")}</summary>
+          <p class="mt-2 text-fg-muted">{t("hooks.otherHint")}</p>
+          {#each [{ id: "codex" as const, label: t("hooks.codexFile"), text: hooks.codex }, { id: "gemini" as const, label: t("hooks.geminiFile"), text: hooks.gemini }] as snip (snip.id)}
+            <div class="mt-3 flex items-center gap-2">
+              <span class="flex-1">{snip.label}</span>
+              <button class="btn h-6" onclick={() => copy(snip.id, snip.text)}>{copied === snip.id ? t("common.copied") : t("common.copy")}</button>
+            </div>
+            <pre class="snippet selectable">{snip.text}</pre>
+          {/each}
+        </details>
+      {/if}
+    </div>
+
     <div class="about">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-fg-muted">{t("help.version", { version: app.env?.version ?? "" })}</span>
@@ -166,6 +214,26 @@
 </div>
 
 <style>
+  .hooks {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .hooks summary {
+    cursor: pointer;
+  }
+  .snippet {
+    margin-top: 4px;
+    max-height: 160px;
+    overflow: auto;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-sunken);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    white-space: pre;
+  }
   .about {
     margin-top: 16px;
     padding-top: 14px;
@@ -182,6 +250,8 @@
   .dialog {
     width: 460px;
     max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
     background: var(--bg);
     border: 1px solid var(--border-strong);
     border-radius: 10px;

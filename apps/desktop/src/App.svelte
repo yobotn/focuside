@@ -14,6 +14,7 @@
   import MessageBox from "./lib/components/MessageBox.svelte";
   import Rail from "./lib/components/Rail.svelte";
   import UndoDialog from "./lib/components/UndoDialog.svelte";
+  import HooksConsent from "./lib/components/HooksConsent.svelte";
   import FileTree from "./lib/components/FileTree.svelte";
   import Viewer from "./lib/components/Viewer.svelte";
   import SearchPanel from "./lib/components/SearchPanel.svelte";
@@ -335,6 +336,10 @@
 
 {#if app.undoTarget}
   <UndoDialog target={app.undoTarget} />
+{/if}
+
+{#if app.hooksAsk}
+  <HooksConsent onanswer={(yes) => app.hooksAsk?.(yes)} />
 {/if}
 
 {#if app.toast}

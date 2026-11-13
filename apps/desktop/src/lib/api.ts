@@ -17,6 +17,13 @@ export interface ClaudeRouteInfo {
   route: "chat" | "pane";
 }
 
+/** The hook helper and the Codex and Gemini CLI snippets for this OS. Null fields: the helper is missing. */
+export interface HooksInfo {
+  helper: string | null;
+  codex: string | null;
+  gemini: string | null;
+}
+
 export interface EnvCheck {
   claude: string | null;
   git: string | null;
@@ -38,8 +45,10 @@ export const api = {
 
   agentList: () => invoke<AgentInfo[]>("agent_list"),
   adapterDownload: () => invoke<string>("adapter_download"),
-  sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string, mode: "chat" | "pane" = "chat") =>
-    invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode }),
+  /** `hooks`: the user's answer to the plugin question. Only true adds the focuside plugin to a Claude pane. */
+  sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string, mode: "chat" | "pane" = "chat", hooks = false) =>
+    invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode, hooks }),
+  hooksInfo: () => invoke<HooksInfo>("hooks_info"),
   sessionCheckpoint: (key: string) => invoke<void>("session_checkpoint", { key }),
   claudeRoute: () => invoke<ClaudeRouteInfo | null>("claude_route"),
   sessionPrompt: (key: string, blocks: unknown[], planFirst: boolean, continueTurn: string | null = null) =>

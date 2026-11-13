@@ -1,7 +1,9 @@
 <script lang="ts">
   // Pane mode: the agent's own unmodified TUI (for example `claude`) in a terminal in the
   // center view. The user types every prompt there. FocusIDE shows the changes of each turn
-  // beside it (or above it in a narrow window), with Undo turn. A turn ends on Checkpoint or
+  // beside it (or above it in a narrow window), with Undo turn and a short summary. With hooks
+  // (the focuside plugin, or hooks the user added), a prompt starts a turn and the agent's stop
+  // ends it, and a proposed plan shows as a card. Without hooks a turn ends on Checkpoint or
   // when the TUI exits. FocusIDE never types into the pane (see stores/paneterm).
   import { onDestroy, onMount } from "svelte";
   import { t } from "../i18n";
@@ -9,6 +11,7 @@
   import { paneTerms, type PaneTerm } from "../stores/paneterm.svelte";
   import type { Session } from "../stores/session.svelte";
   import ChangesCard from "./ChangesCard.svelte";
+  import FileIcon from "./FileIcon.svelte";
 
   let { session, project }: { session: Session; project: Project } = $props();
 
@@ -22,15 +25,19 @@
   const side = $derived(width >= 980);
   const name = $derived(app.agentName(session.agent));
   const note = $derived(session.agent === "claude" ? t("pane.noteClaude") : t("pane.note", { agent: name }));
-  const cards = $derived(session.entries.filter((e) => e.t === "changes" || e.t === "note"));
+  const cards = $derived(session.entries.filter((e) => e.t === "changes" || e.t === "note" || e.t === "panePlan"));
+  const hookMode = $derived(session.hooksLive || session.hooksExpected);
+  const MAX_STEPS = 6;
 
   const status = $derived.by(() => {
     if (pane?.exited || (!session.paneAlive && session.status === "ready")) return { text: t("pane.exited", { agent: name }), tone: "muted" };
     switch (session.tracking) {
       case "on":
-        return { text: t("pane.tracking"), tone: "muted" };
+        return { text: session.turnSource === "hook" ? t("pane.trackingHook", { agent: name }) : t("pane.tracking"), tone: "muted" };
       case "otherRunning":
-        return { text: t("pane.notTracked"), tone: "warn" };
+        return { text: hookMode ? t("pane.notTrackedHook") : t("pane.notTracked"), tone: "warn" };
+      case "waiting":
+        return { text: session.hooksLive ? t("pane.hooksWaiting") : t("pane.hooksExpected"), tone: "muted" };
       case "error":
         return { text: t("pane.trackingFailed", { error: session.trackingError ?? "" }), tone: "warn" };
       default:
@@ -66,7 +73,7 @@
     <button
       class="btn"
       disabled={!session.paneAlive}
-      title={t("pane.checkpointHint")}
+      title={session.hooksLive ? t("pane.checkpointHintHooks") : t("pane.checkpointHint")}
       onclick={() => {
         app.checkpoint(session);
         pane?.focus();
@@ -80,7 +87,7 @@
     {#if side || cards.length}
       <aside class="cards" bind:this={cardsEl} aria-label={t("pane.cards")}>
         {#if !cards.length}
-          <p class="text-fg-muted">{t("pane.cardsEmpty")}</p>
+          <p class="text-fg-muted">{hookMode ? t("pane.cardsEmptyHooks") : t("pane.cardsEmpty")}</p>
         {/if}
         {#each cards as entry (entry.id)}
           {#if entry.t === "changes"}
@@ -96,8 +103,52 @@
                 if (e.key.toLowerCase() === "u" && !entry.undo) app.askUndo(session, entry);
               }}
             >
-              <ChangesCard {session} result={entry.result} undo={entry.undo} onundo={() => app.askUndo(session, entry)} />
+              <ChangesCard
+                {session}
+                result={entry.result}
+                plan={session.panePlanOf(entry.turnId)}
+                undo={entry.undo}
+                onundo={() => app.askUndo(session, entry)}
+              />
             </div>
+          {:else if entry.t === "panePlan"}
+            <section class="plan" aria-label={t("plan.title")}>
+              <div class="plan-head">
+                <span class="font-semibold">{t("plan.title")}</span>
+                <span class="sep">.</span>
+                <span>{t("plan.steps", { count: entry.plan.steps.length })}</span>
+                {#if entry.plan.files.length}
+                  <span class="sep">.</span>
+                  <span>{t("plan.files", { count: entry.plan.files.length })}</span>
+                {/if}
+                <span class="ms-auto" class:text-accent={entry.approved} class:text-warn={!entry.approved}>
+                  {entry.approved ? t("pane.planApproved") : t("pane.planProposed")}
+                </span>
+              </div>
+              <div class="plan-body selectable">
+                {#if entry.plan.fallback}<p class="text-fg-muted">{t("plan.fallback")}</p>{/if}
+                <ol>
+                  {#each entry.plan.steps.slice(0, MAX_STEPS) as step, i (i)}<li>{step}</li>{/each}
+                </ol>
+                {#if entry.plan.steps.length > MAX_STEPS}
+                  <p class="text-fg-muted">{t("plan.more", { count: entry.plan.steps.length - MAX_STEPS })}</p>
+                {/if}
+                {#if entry.plan.files.length}
+                  <ul class="files">
+                    {#each entry.plan.files as f (f.path)}
+                      <li title={f.reason || f.path}>
+                        <span class="w-12 shrink-0 text-fg-muted">{t(`plan.change.${f.change}`)}</span>
+                        <FileIcon path={f.path} />
+                        <span class="truncate">{f.path}</span>
+                        {#if !f.found}<span class="text-warn">{t("plan.missingFile")}</span>{/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+                <p class="text-fg-muted">{entry.plan.risk ? t("plan.risk", { risk: entry.plan.risk }) : t("plan.riskNone")}</p>
+                {#if !entry.approved}<p class="text-fg-muted">{t("pane.planHint")}</p>{/if}
+              </div>
+            </section>
           {:else if entry.t === "note"}
             <p class="selectable" class:text-fg-muted={entry.tone === "muted"} class:text-danger={entry.tone === "error"} class:text-warn={entry.tone === "warn"}>
               {entry.text}
@@ -165,6 +216,42 @@
     max-height: none;
     border-bottom: 0;
     border-inline-start: 1px solid var(--border);
+  }
+  .plan {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  .plan-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+  .sep {
+    color: var(--fg-faint);
+  }
+  .plan-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px 10px;
+  }
+  .plan-body ol {
+    padding-inline-start: 20px;
+    list-style: decimal;
+  }
+  .files li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
   }
   .card-wrap:focus {
     outline: 2px solid color-mix(in srgb, var(--project) 70%, transparent);

@@ -27,6 +27,12 @@
   const changes = $derived(result.changes);
   const files = $derived(changes?.files ?? []);
   const yours = $derived(new Set(result.yourEdits ?? []));
+  // Turn summary without a model call (summary.rs). The head already shows files and lines.
+  const summary = $derived(result.summary);
+  const moreCommands = $derived(summary ? Math.max(0, summary.commandCount - summary.commands.length) : 0);
+  const showSummary = $derived(
+    !!summary && !!(summary.created || summary.deleted || summary.commandCount || summary.planStepCount || summary.excerpt || (embedded && summary.files)),
+  );
 
   function word(status: string) {
     return status === "create" ? t("plan.change.create") : status === "delete" ? t("plan.change.delete") : status === "rename" ? t("plan.change.rename") : t("plan.change.edit");
@@ -102,6 +108,33 @@
         <li class="row text-fg-muted">{t("changes.generated", { count: g.count, folder: g.folder })}</li>
       {/each}
     </ul>
+  {/if}
+
+  {#if summary && showSummary}
+    <div class="summary selectable">
+      {#if embedded && summary.files}
+        <p>{t("summary.changed", { count: summary.files, added: summary.added, removed: summary.removed })}</p>
+      {/if}
+      {#if summary.created || summary.deleted}
+        <p>{t("summary.createdDeleted", { created: summary.created, deleted: summary.deleted })}</p>
+      {/if}
+      {#if summary.commandCount}
+        <p>{t("summary.commands", { count: summary.commandCount })}</p>
+        <ul class="cmds">
+          {#each summary.commands as c, i (i)}
+            <li class="mono truncate" title={c}>{c}</li>
+          {/each}
+          {#if moreCommands}<li class="text-fg-muted">{t("summary.moreCommands", { count: moreCommands })}</li>{/if}
+        </ul>
+      {/if}
+      {#if summary.planStepCount}
+        <p>{t("summary.plan", { count: summary.planStepCount })}</p>
+      {/if}
+      {#if summary.excerpt}
+        <p class="label">{t("summary.message")}</p>
+        <blockquote>{summary.excerpt}</blockquote>
+      {/if}
+    </div>
   {/if}
 
   {#if result.notCovered?.length}
@@ -200,6 +233,31 @@
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 0 4px;
+  }
+  .summary {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 12px 8px;
+    border-top: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 12.5px;
+  }
+  .cmds {
+    padding-inline-start: 10px;
+  }
+  .mono {
+    font-family: var(--font-mono);
+  }
+  .label {
+    margin-top: 2px;
+    font-weight: 600;
+  }
+  blockquote {
+    margin: 0;
+    padding-inline-start: 8px;
+    border-inline-start: 2px solid var(--border-strong);
+    color: var(--fg);
   }
   .actions {
     display: flex;

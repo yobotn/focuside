@@ -80,6 +80,22 @@ export interface FileVersions {
   binary: boolean;
 }
 
+/** Turn summary without a model call (crates/core/src/summary.rs). */
+export interface TurnSummary {
+  files: number;
+  created: number;
+  deleted: number;
+  added: number;
+  removed: number;
+  generated: number;
+  commandCount: number;
+  commands: string[];
+  planSteps: string[];
+  planStepCount: number;
+  /** Start of the agent's last message (panes with hooks). */
+  excerpt: string | null;
+}
+
 /** Result of a finished turn, from the `turn_ended` event. */
 export interface TurnResult {
   turnId: string;
@@ -92,6 +108,12 @@ export interface TurnResult {
   outside?: boolean;
   yourEdits?: string[];
   snapshotError?: string;
+  summary?: TurnSummary;
+  /** Panes: where the turn came from ("hook" or "manual") and why it ended. */
+  source?: "hook" | "manual";
+  reason?: string;
+  /** Panes: StopFailure error type ("" when unknown). Null for a normal end. */
+  failure?: string | null;
 }
 
 export interface ConfigOption {
@@ -143,6 +165,8 @@ export type Entry =
       undo: UndoState | null;
     }
   | { t: "changes"; id: string; turnId: string; result: TurnResult; undo: UndoState | null }
+  /** A pane plan from the ExitPlanMode hook. Approval happens in the agent's TUI. */
+  | { t: "panePlan"; id: string; turnId: string | null; text: string; plan: ParsedPlan; approved: boolean }
   | { t: "note"; id: string; text: string; tone: "muted" | "error" | "warn" };
 
 export interface UndoState {

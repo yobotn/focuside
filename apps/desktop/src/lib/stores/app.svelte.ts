@@ -33,6 +33,8 @@ export interface Settings {
   autoUpdate: boolean;
   showIgnored: boolean;
   notifications: boolean;
+  /** The user's answer to "add an observe-only plugin to Claude panes". Null: not asked yet. */
+  claudeHooks: boolean | null;
 }
 
 export type Side = "left" | "right";
@@ -67,7 +69,7 @@ const defaults: Persisted = {
   sessions: {},
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: null },
   filesVisible: true,
   layout: { ...defaultLayout },
 };
@@ -104,6 +106,8 @@ class AppStore {
   terminalCommand = $state<string | null>(null);
   focused = $state(true);
   toast = $state<{ text: string; tone: "muted" | "error" } | null>(null);
+  /** Set while the plugin question for Claude panes is shown; called with the answer. */
+  hooksAsk = $state<((yes: boolean) => void) | null>(null);
   /** Undo dialog target. */
   undoTarget = $state<{ projectId: string; turnId: string; entryId: string; sessionKey: string } | null>(null);
   /** Last undo, for "Redo last undo" in the palette. */
@@ -385,9 +389,11 @@ class AppStore {
       const agent = resume?.agent ?? agentId ?? this.settings.agent;
       const m: SessionMode = resume ? (resume.mode ?? "chat") : (mode ?? (agent === "claude" ? await this.claudeMode() : "chat"));
       if (this.active !== p) return;
+      const hooks = m === "pane" && agent === "claude" ? await this.claudeHooks() : false;
+      if (this.active !== p) return;
       const key =
         m === "pane"
-          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane")
+          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane", hooks)
           : await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
       const s = new Session(key, p.id, p.root, resume);
       s.agent = agent;
@@ -420,6 +426,19 @@ class AppStore {
       }
       else this.flash(msg, "error");
     }
+  }
+
+  /** The plugin answer for a new Claude pane. Asks once; Settings can change it later. */
+  private claudeHooks(): Promise<boolean> {
+    if (this.settings.claudeHooks !== null) return Promise.resolve(this.settings.claudeHooks);
+    return new Promise((resolve) => {
+      this.hooksAsk = (yes) => {
+        this.hooksAsk = null;
+        this.settings.claudeHooks = yes;
+        this.save();
+        resolve(yes);
+      };
+    });
   }
 
   showSession(key: string) {

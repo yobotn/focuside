@@ -72,8 +72,11 @@ export interface SavedSession {
 /** Chat: FocusIDE's own UI over ACP. Pane: the agent's own TUI in a terminal in the center. */
 export type SessionMode = "chat" | "pane";
 
-/** Turn tracking in a pane. "otherRunning": another session held the project, so the turn is not tracked. */
-export type Tracking = "off" | "on" | "otherRunning" | "error";
+/**
+ * Turn tracking in a pane. "otherRunning": another session held the project, so the turn is not
+ * tracked. "waiting": hooks start the next turn when the user sends a prompt.
+ */
+export type Tracking = "off" | "on" | "otherRunning" | "error" | "waiting";
 
 export class Session {
   key: string;
@@ -92,6 +95,12 @@ export class Session {
   paneAlive = $state(false);
   tracking = $state<Tracking>("off");
   trackingError = $state<string | null>(null);
+  /** Pane: started with the focuside plugin, so hooks should report turns. */
+  hooksExpected = $state(false);
+  /** Pane: a hook event arrived. Turns now start on a prompt and end when the agent stops. */
+  hooksLive = $state(false);
+  /** Pane: the open turn came from a hook (a prompt) or from Checkpoint. */
+  turnSource = $state<"hook" | "manual" | null>(null);
   name = $state("");
   renamed = $state(false);
   status = $state<Status>("idle");
@@ -493,37 +502,74 @@ export class Session {
     return w;
   }
 
-  /** Events of a pane session. Turns come from Checkpoint and pane exit (see pane.rs). */
+  /** The approved plan of a pane turn, for "Not in plan" rows in its changes card. */
+  panePlanOf(turnId: string): ParsedPlan | null {
+    const p = this.entries.findLast((x) => x.t === "panePlan" && x.turnId === turnId && x.approved);
+    return p && p.t === "panePlan" ? p.plan : null;
+  }
+
+  /**
+   * Events of a pane session. Turns come from hooks (a prompt starts one, Stop ends it) or,
+   * without hooks, from Checkpoint and pane exit (see pane.rs).
+   */
   private handlePane(e: SessionEvent): Waiting | "none" {
     switch (e.kind) {
       case "pane_started":
         this.status = "ready";
         this.paneAlive = true;
+        this.hooksExpected = !!e.hooksExpected;
         break;
       case "pane_exited":
         this.paneAlive = false;
         this.tracking = "off";
         this.turnId = null;
+        this.turnSource = null;
         break;
+      case "hooks_live":
+        this.hooksLive = true;
+        break;
+      case "pane_idle":
+        if (this.tracking !== "error") this.tracking = "waiting";
+        this.turnId = null;
+        this.turnSource = null;
+        break;
+      case "pane_plan": {
+        const plan: ParsedPlan = e.plan;
+        const turnId: string | null = e.turnId ?? null;
+        const open = this.entries.findLast((x) => x.t === "panePlan" && x.turnId === turnId && !x.approved);
+        if (open && open.t === "panePlan") {
+          open.plan = plan;
+          open.text = e.planText ?? "";
+          open.approved = !!e.approved;
+        } else {
+          this.entries.push({ t: "panePlan", id: nid(), turnId, text: e.planText ?? "", plan, approved: !!e.approved });
+        }
+        break;
+      }
       case "turn_started":
         this.tracking = "on";
         this.trackingError = null;
         this.turnId = e.turnId;
+        this.turnSource = e.source === "hook" ? "hook" : "manual";
         break;
       case "turn_untracked":
         this.tracking = e.reason === "otherRunning" ? "otherRunning" : "error";
         this.trackingError = e.error ?? null;
+        // With hooks the status changes again at the next Stop, so the card list keeps a note.
+        if (e.reason === "otherRunning" && e.source === "hook") this.note(t("pane.notTrackedHook"), "warn");
         break;
       case "turn_ended": {
         const r = e as unknown as TurnResult;
         this.tracking = "off";
         this.turnId = null;
+        this.turnSource = null;
         this.updated = Date.now();
         if (r.hasSnapshot && (r.changes?.files.length || r.changes?.generated.length)) {
           this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
         } else if (!r.snapshotError && e.reason === "checkpoint") {
           this.note(t("pane.noChanges"));
         }
+        if (r.failure != null) this.note(r.failure ? t("pane.stopFailure", { error: r.failure }) : t("pane.stopFailureUnknown"), "warn");
         if (r.snapshotError) this.note(t("changes.snapshotFailed", { error: r.snapshotError }), "error");
         break;
       }
