@@ -1,0 +1,22 @@
+name: Agent commands
+
+# Compares the agent launch commands in crates/core/src/agent.rs with the ACP registry.
+# Monthly and on demand. It only reports; it never fails the build and installs nothing.
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Compare with the ACP registry
+        run: node scripts/check-agents.mjs >> "$GITHUB_STEP_SUMMARY"; cat "$GITHUB_STEP_SUMMARY"

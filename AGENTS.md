@@ -29,7 +29,10 @@ npm run dev                      # run the app
 npm run lint                     # clippy -D warnings, rustfmt --check, text lint, i18n check, svelte-check
 npm test                         # cargo test --workspace
 npm run build                    # release installer
+node scripts/check-agents.mjs    # compare agent launch commands with the ACP registry (monthly)
 ```
+
+Once a month, run `node scripts/check-agents.mjs` (or the "Agent commands" workflow, which runs on the 1st of each month and on demand). It compares each `AgentSpec` in `crates/core/src/agent.rs` with the ACP registry and prints the differences. It needs the network, so CI does not run it on every push. It only reports; `--strict` exits 1 on a difference that is not listed as known. When it reports a difference, check the vendor docs, then update `agent.rs`, the comments there and PLAN.md section 10. Never make FocusIDE install an agent.
 
 `npm run lint` and `npm test` must pass before you commit.
 
