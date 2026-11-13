@@ -64,9 +64,15 @@ jobs:
 
             FocusIDE starts the coding agent you installed yourself (Claude Code, Codex, Gemini CLI and other ACP agents). It never reads, stores or proxies your credentials.
 
-            Claude chat mode downloads the claude-agent-acp connector from its GitHub release (agentclientprotocol/claude-agent-acp) the first time you use it, after you agree.
+            Claude with a plan login (Pro, Max, Team or Enterprise) opens in a Claude pane. The pane is the real `claude` CLI with its own login, and you type every prompt in it. FocusIDE shows the changes of each turn and can undo them.
 
-            Claude needs an API key (`ANTHROPIC_API_KEY`) or a cloud provider. Anthropic does not allow apps built on the Claude Agent SDK to use Claude plans, so FocusIDE does not start Claude with a Pro, Max, Team or Enterprise login.
+            Claude chat mode needs an API key (`ANTHROPIC_API_KEY`) or a cloud provider (Bedrock, Vertex AI or Foundry).
+
+            Chat mode downloads the claude-agent-acp connector from its GitHub release (agentclientprotocol/claude-agent-acp) the first time you use it, after you agree.
+
+            Claude panes can use an observe-only plugin that reports when a turn starts and ends. FocusIDE asks before it adds the plugin, and you can turn it off in Settings.
+
+            New agents: Antigravity CLI, Copilot CLI, Cursor CLI, Kiro CLI, Cline, Kimi Code and Mistral Vibe. Install them yourself; FocusIDE does not install agents. Antigravity CLI opens in a pane, and FocusIDE asks once before chat mode.
 
             Found a problem? [Open an issue](https://github.com/yobotn/focuside/issues/new/choose).
           releaseDraft: true
