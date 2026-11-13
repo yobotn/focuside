@@ -56,8 +56,9 @@ fn is_executable(p: &Path) -> bool {
     p.is_file()
 }
 
-/// For a Windows `.cmd` or `.bat` shim, the program it starts: an `.exe` or a `.js` file named
-/// in the shim. Other paths are returned unchanged.
+/// For a Windows `.cmd` or `.bat` shim, the program it starts: an `.exe` or a Node script
+/// (`.js`, `.mjs`, `.cjs`, or a file without extension that starts with a node shebang) named in
+/// the shim. Other paths are returned unchanged.
 pub fn resolve_shim(path: &Path) -> PathBuf {
     let ext = path
         .extension()
@@ -78,21 +79,38 @@ pub fn resolve_shim(path: &Path) -> PathBuf {
             .trim_start_matches(['\\', '/'])
             .to_string();
         let lower = t.to_lowercase();
-        if (lower.ends_with(".js") || lower.ends_with(".exe"))
-            && !lower.ends_with("node.exe")
-            && !t.contains('%')
-        {
-            let p = if Path::new(&t).is_absolute() {
-                PathBuf::from(&t)
-            } else {
-                dir.join(&t)
-            };
-            if p.is_file() {
-                return p;
-            }
+        if t.is_empty() || t.contains('%') || lower.ends_with("node.exe") {
+            continue;
+        }
+        let p = if Path::new(&t).is_absolute() {
+            PathBuf::from(&t)
+        } else {
+            dir.join(&t)
+        };
+        if (lower.ends_with(".exe") || is_node_script(&p)) && p.is_file() {
+            return p;
         }
     }
     path.to_path_buf()
+}
+
+/// A file Node runs: `.js`, `.mjs` or `.cjs`, or on Windows a file without extension whose first
+/// line is a node shebang (npm packages such as `cline` ship their bin that way).
+pub fn is_node_script(path: &Path) -> bool {
+    match path.extension().map(|e| e.to_string_lossy().to_lowercase()) {
+        Some(e) => matches!(e.as_str(), "js" | "mjs" | "cjs"),
+        None if cfg!(windows) => {
+            use std::io::Read;
+            let mut head = [0u8; 64];
+            let n = std::fs::File::open(path)
+                .and_then(|mut f| f.read(&mut head))
+                .unwrap_or(0);
+            let line = String::from_utf8_lossy(&head[..n]);
+            let line = line.lines().next().unwrap_or_default();
+            line.starts_with("#!") && line.contains("node")
+        }
+        None => false,
+    }
 }
 
 /// PATH as the user's login shell sets it. Only needed on macOS, where apps started from the
@@ -157,5 +175,37 @@ mod tests {
             target.canonicalize().unwrap(),
             "{got:?}"
         );
+    }
+
+    /// Shims for bins that are `.mjs` files or extensionless node scripts (Kimi Code, Cline).
+    #[cfg(windows)]
+    #[test]
+    fn follows_shim_to_mjs_and_shebang_script() {
+        let dir = tempfile::tempdir().unwrap();
+        for (rel, body) in [
+            ("node_modules/a/dist/main.mjs", ""),
+            (
+                "node_modules/b/bin/b",
+                "#!/usr/bin/env node\nconsole.log(1)\n",
+            ),
+        ] {
+            let target = dir.path().join(rel);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(&target, body).unwrap();
+            let shim = dir.path().join("tool.cmd");
+            let win = rel.replace('/', "\\");
+            let text = format!("@ECHO off\r\n\"%_prog%\"  \"%dp0%\\{win}\" %*\r\n");
+            std::fs::write(&shim, text).unwrap();
+            let got = resolve_shim(&shim);
+            assert_eq!(
+                got.canonicalize().unwrap(),
+                target.canonicalize().unwrap(),
+                "{got:?}"
+            );
+            assert!(is_node_script(&got));
+        }
+        let plain = dir.path().join("plain");
+        std::fs::write(&plain, "MZ").unwrap();
+        assert!(!is_node_script(&plain));
     }
 }

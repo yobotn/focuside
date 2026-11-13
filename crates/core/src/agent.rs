@@ -293,6 +293,103 @@ pub const AGENTS: &[AgentSpec] = &[
         tui_program: Some("goose"),
         tui_args: &["session"],
     },
+    // Phase 4 agents (2026-11-13). Each launch command was checked against the ACP registry
+    // (cdn.agentclientprotocol.com/registry/v1/latest/registry.json) and the vendor docs on that
+    // date; `node scripts/check-agents.mjs` repeats the registry part. None of them was run on
+    // this machine. Install hints are commands or doc pages; FocusIDE never installs anything.
+    AgentSpec {
+        id: "antigravity",
+        name: "Antigravity CLI",
+        program: "agy",
+        // Verified: antigravity.google/docs/cli/acp ("agy acp [flags]"). The registry entry
+        // `antigravity-acp` is a different program, the `agy_acp_server` from the Antigravity
+        // IDE extensions, so check-agents reports a mismatch on purpose.
+        args: &["acp"],
+        // The vendor installer is a script; the page shows it per OS.
+        install: "https://antigravity.google/docs/install",
+        // Verified: "Sign in once with an interactive `agy` session" (same page). Never `agy -p`.
+        tui_program: Some("agy"),
+        tui_args: &[],
+    },
+    AgentSpec {
+        id: "copilot",
+        name: "Copilot CLI",
+        program: "copilot",
+        // Verified: registry `github-copilot-cli` (npx @github/copilot --acp) and the GitHub
+        // ACP server reference (public preview). stdio is the default transport.
+        args: &["--acp"],
+        // Verified: GitHub install page and the npm package's bin name `copilot`.
+        install: "npm install -g @github/copilot",
+        // Sign-in happens in the TUI (`/login`), which ACP does not support.
+        tui_program: Some("copilot"),
+        tui_args: &[],
+    },
+    AgentSpec {
+        id: "cursor",
+        name: "Cursor CLI",
+        // The docs call the binary `agent`; the installer also creates `cursor-agent` (legacy
+        // name, checked in cursor.com/install for both shells) and the registry starts
+        // `cursor-agent acp`. `cursor-agent` is used because `agent` is too generic a name.
+        // Unverified: starting the Windows `cursor-agent.cmd` (it runs a PowerShell script).
+        program: "cursor-agent",
+        // Verified: cursor.com/docs/cli/acp (`agent acp`) and registry `cursor`.
+        args: &["acp"],
+        // The vendor installer is a script (PowerShell on Windows, bash elsewhere).
+        install: "https://cursor.com/docs/cli/installation",
+        // Verified: running `agent` with no arguments starts interactive mode (install page).
+        tui_program: Some("cursor-agent"),
+        tui_args: &[],
+    },
+    AgentSpec {
+        id: "kiro",
+        name: "Kiro CLI",
+        program: "kiro-cli",
+        // Verified: kiro.dev/docs/cli/acp (`kiro-cli acp`). The registry adds
+        // `--agent-engine=v3`, which overrides the user's saved engine setting, so it is left
+        // out. The registry has no Windows build; the Kiro docs list Windows 11 as supported.
+        args: &["acp"],
+        install: "https://kiro.dev/docs/getting-started/installation/",
+        // Verified: "run `kiro-cli`. The terminal UI opens" (kiro.dev/docs/cli/setup).
+        tui_program: Some("kiro-cli"),
+        tui_args: &[],
+    },
+    AgentSpec {
+        id: "cline",
+        name: "Cline",
+        program: "cline",
+        // Verified: registry `cline` (npx cline --acp) and docs.cline.bot ACP page.
+        args: &["--acp"],
+        install: "npm install -g cline",
+        // Verified: `cline` with no arguments opens an interactive session (Cline CLI docs).
+        tui_program: Some("cline"),
+        tui_args: &[],
+    },
+    AgentSpec {
+        id: "kimi",
+        name: "Kimi Code",
+        // The npm package's bin is `kimi`. The archived Kimi CLI (legacy) used the same name.
+        program: "kimi",
+        // Verified in the registry only (`kimi-code`: npx @moonshot-ai/kimi-code acp). The
+        // Kimi Code site does not document ACP mode.
+        args: &["acp"],
+        install: "npm install -g @moonshot-ai/kimi-code",
+        // Verified: "run kimi inside any project to start a conversation" (Kimi Code site).
+        tui_program: Some("kimi"),
+        tui_args: &[],
+    },
+    AgentSpec {
+        id: "vibe",
+        name: "Mistral Vibe",
+        // Verified: registry `mistral-vibe` (`vibe-acp`, no arguments) and the `vibe-acp`
+        // script in the package's pyproject.toml.
+        program: "vibe-acp",
+        args: &[],
+        // Verified: README ("uv tool install mistral-vibe"); installs `vibe` and `vibe-acp`.
+        install: "uv tool install mistral-vibe",
+        // Verified: "run `vibe` in your project" (README).
+        tui_program: Some("vibe"),
+        tui_args: &[],
+    },
 ];
 
 /// What the agent picker shows: each known agent and whether it is installed.
@@ -366,10 +463,7 @@ pub fn tui_command(id: &str) -> Result<TuiCommand, Missing> {
 /// `node <script>`.
 fn runnable(path: PathBuf, args: Vec<String>) -> (PathBuf, Vec<String>) {
     let real = which::resolve_shim(&path);
-    let is_js = real
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("js") || e.eq_ignore_ascii_case("mjs"));
-    if is_js {
+    if which::is_node_script(&real) {
         if let Some(node) = which::find("node") {
             let mut a = vec![real.to_string_lossy().to_string()];
             a.extend(args);
@@ -537,6 +631,21 @@ mod tests {
         assert!(claude.tui_args.is_empty());
         assert_eq!(tui_command("custom"), Err(Missing::Agent));
         assert_eq!(tui_command("nope"), Err(Missing::Agent));
+    }
+
+    #[test]
+    fn agent_ids_are_unique_and_never_print_mode() {
+        let mut ids: Vec<_> = AGENTS.iter().map(|a| a.id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), AGENTS.len());
+        assert!(!ids.contains(&"custom"));
+        for a in AGENTS {
+            assert!(!a.install.is_empty(), "{} has an install hint", a.id);
+            for arg in a.args {
+                assert!(!["-p", "--print"].contains(arg), "{} runs headless", a.id);
+            }
+        }
     }
 
     #[test]
