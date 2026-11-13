@@ -441,6 +441,27 @@ pub const FORBIDDEN_TUI_FLAGS: &[&str] = &[
     "--settings",
 ];
 
+/// Arguments that start an agent's TUI in its plan mode, for "Plan first" in a pane. Claude:
+/// `--permission-mode plan` (listed in `claude --help`, Claude Code 2.1.323). It is a normal
+/// launch option a user types in a terminal: it picks no login method and adds no text to the
+/// model context. Other agents: none known, so their panes start in their default mode.
+pub fn tui_plan_args(id: &str) -> &'static [&'static str] {
+    match id {
+        "claude" => &["--permission-mode", "plan"],
+        _ => &[],
+    }
+}
+
+impl TuiCommand {
+    /// Adds the agent's plan mode arguments (see `tui_plan_args`). Returns false when the agent
+    /// has none.
+    pub fn start_in_plan_mode(&mut self, id: &str) -> bool {
+        let extra = tui_plan_args(id);
+        self.args.extend(extra.iter().map(|s| s.to_string()));
+        !extra.is_empty()
+    }
+}
+
 /// The TUI command for an agent id, found with the same lookup as chat mode (PATH through
 /// `which`, npm shims followed, `node <script>` when the shim points at a script).
 pub fn tui_command(id: &str) -> Result<TuiCommand, Missing> {
@@ -629,6 +650,29 @@ mod tests {
         let claude = AGENTS.iter().find(|a| a.id == "claude").unwrap();
         assert_eq!(claude.tui_program, Some("claude"));
         assert!(claude.tui_args.is_empty());
+        // "Plan first" in a Claude pane: a launch option, allowed. It is not a forbidden flag.
+        assert_eq!(tui_plan_args("claude"), &["--permission-mode", "plan"]);
+        for a in AGENTS {
+            for arg in tui_plan_args(a.id) {
+                assert!(
+                    !FORBIDDEN_TUI_FLAGS.contains(arg),
+                    "{} passes {arg} in plan mode",
+                    a.id
+                );
+            }
+        }
+        let mut tui = TuiCommand {
+            program: PathBuf::from("claude"),
+            args: vec![],
+        };
+        assert!(tui.start_in_plan_mode("claude"));
+        assert_eq!(tui.args, vec!["--permission-mode", "plan"]);
+        let mut other = TuiCommand {
+            program: PathBuf::from("codex"),
+            args: vec![],
+        };
+        assert!(!other.start_in_plan_mode("codex"));
+        assert!(other.args.is_empty());
         assert_eq!(tui_command("custom"), Err(Missing::Agent));
         assert_eq!(tui_command("nope"), Err(Missing::Agent));
     }

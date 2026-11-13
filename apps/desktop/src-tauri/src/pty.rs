@@ -398,7 +398,25 @@ mod tests {
         );
     }
 
-    /// The same with the launch of a Claude pane after the plugin question was answered yes:
+    /// The same with the launch of a Claude pane with "Plan first" on: `--permission-mode plan`.
+    /// `cargo test -p focuside-desktop -- --ignored real_claude_tui_in_plan_mode`.
+    #[test]
+    #[ignore]
+    fn real_claude_tui_in_plan_mode() {
+        let mut tui = focuside_core::agent::tui_command("claude").expect("claude installed");
+        assert!(tui.start_in_plan_mode("claude"));
+        let dir = tempfile::tempdir().unwrap();
+        tui_starts_and_closes(
+            Launch {
+                program: tui.program.to_string_lossy().to_string(),
+                args: tui.args.clone(),
+                env: vec![],
+            },
+            dir.path(),
+        );
+    }
+
+    /// The same with the launch of a Claude pane with turn tracking on (the default):
     /// `--plugin-dir` with the generated plugin and `FOCUSIDE_EVENTS`. Needs the built helper
     /// (`node scripts/build-hook.mjs`):
     /// `cargo test -p focuside-desktop -- --ignored real_claude_tui_with_plugin`.

@@ -225,10 +225,7 @@ impl Session {
                 p.tree.kill().await;
                 if e.is_auth_required() {
                     // The adapter (--hide-claude-auth) refused a Claude plan login.
-                    if self.cmd.claude.is_some()
-                        && e.data.as_ref().and_then(|d| d["reason"].as_str())
-                            == Some(agent::SUBSCRIPTION_NOT_SUPPORTED)
-                    {
+                    if self.cmd.claude.is_some() && adapter_refused_plan(&e) {
                         return Err(self.route_claude(agent::ClaudeAccess::Subscription));
                     }
                     self.emit("signin", json!({}));
@@ -674,13 +671,27 @@ impl Session {
             // Requests left open belong to the finished turn.
             st.pending.clear();
         }
+        // Claude can ask for a login in the middle of a prompt too (an expired key, or a Claude
+        // plan login after `/login`). That gets the same route as at start: "Open Claude pane",
+        // not the raw "Authentication required".
+        let routed = match &result {
+            Err(e) if e.is_auth_required() => self.auth_route(e).await,
+            _ => None,
+        };
         let (stop_reason, error) = match &result {
+            _ if routed.is_some() => ("authRequired".to_string(), None),
             Ok(v) => (
                 v["stopReason"].as_str().unwrap_or("end_turn").to_string(),
                 None,
             ),
             Err(e) => ("error".to_string(), Some(e.message.clone())),
         };
+        if let Some(access) = routed {
+            self.emit(
+                "claude_route",
+                json!({ "access": access, "route": access.route() }),
+            );
+        }
         let mut data = json!({
             "turnId": turn.id,
             "stopReason": stop_reason,
@@ -721,6 +732,20 @@ impl Session {
                     me.emit("error", json!({ "message": format!("{e:#}") }));
                 }
             });
+        }
+    }
+
+    /// The Claude login state behind an "authentication required" answer to a prompt, as a
+    /// route for the UI. None for agents other than Claude: their error is shown as it is.
+    async fn auth_route(&self, e: &acp::RpcError) -> Option<agent::ClaudeAccess> {
+        let claude = self.cmd.claude.as_ref()?;
+        if adapter_refused_plan(e) {
+            return Some(agent::ClaudeAccess::Subscription);
+        }
+        match agent::claude_auth(claude, &self.cmd.env).await {
+            Ok(auth) if auth.access().route() != agent::ClaudeRoute::Chat => Some(auth.access()),
+            // Signed in for chat mode, yet refused: the key no longer works.
+            _ => Some(agent::ClaudeAccess::SignedOut),
         }
     }
 
@@ -798,6 +823,11 @@ impl Session {
     }
 }
 
+/// The adapter (`--hide-claude-auth`) refused a Claude plan login.
+fn adapter_refused_plan(e: &acp::RpcError) -> bool {
+    e.data.as_ref().and_then(|d| d["reason"].as_str()) == Some(agent::SUBSCRIPTION_NOT_SUPPORTED)
+}
+
 /// Drops a leading `cd "<project root>" && ` from a shell command: it says nothing new.
 fn strip_cd(cmd: &str, root: &Path) -> String {
     let Some(rest) = cmd.strip_prefix("cd ") else {
@@ -848,5 +878,28 @@ pub(crate) fn inside(root: &Path, path: &str) -> Option<String> {
         }
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adapter_plan_refusal_is_recognized() {
+        let refused = acp::RpcError {
+            code: -32000,
+            message: "Authentication required".into(),
+            data: Some(json!({ "reason": agent::SUBSCRIPTION_NOT_SUPPORTED })),
+        };
+        assert!(refused.is_auth_required());
+        assert!(adapter_refused_plan(&refused));
+        let plain = acp::RpcError {
+            code: -32000,
+            message: "Authentication required".into(),
+            data: None,
+        };
+        assert!(plain.is_auth_required());
+        assert!(!adapter_refused_plan(&plain));
     }
 }

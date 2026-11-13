@@ -6,8 +6,8 @@
 //!   events/<session>`, never the user's repo).
 //! - The Claude plugin `focuside` is generated here, in app data, for the current OS: a
 //!   manifest, `hooks/hooks.json` in exec form (no shell) and a copy of the helper. Claude panes
-//!   get `--plugin-dir <folder>` only after the user agreed once (a FocusIDE setting). Nothing
-//!   is written to `~/.claude` or to the project.
+//!   get `--plugin-dir <folder>` while the setting "Turn tracking in Claude panes" is on (the
+//!   default). Nothing is written to `~/.claude` or to the project.
 //! - The plugin has hooks only: no SessionStart, no skills, no output style, no MCP, no
 //!   `asyncRewake`, no `additionalContext`. The helper sits in `hook/`, not `bin/`, because a
 //!   plugin's `bin/` folder goes on the PATH of Claude's Bash tool.

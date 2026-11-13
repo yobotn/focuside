@@ -224,8 +224,10 @@ pub async fn project_close(state: State<'_, AppState>, id: String) -> Res<()> {
 /// Creates a session and starts its agent in the background. Progress arrives as events.
 /// `mode` "pane" creates a pane session instead: the agent's own TUI, which the UI starts with
 /// `pty_open` and this session key. A pane always starts a fresh TUI; `resume` is not passed
-/// to the agent. `hooks` is the user's answer to the plugin question: only with true does a
-/// Claude pane get `--plugin-dir` with the generated focuside plugin.
+/// to the agent. `hooks` is the "Turn tracking in Claude panes" setting (on by default): only
+/// with true does a Claude pane get `--plugin-dir` with the generated focuside plugin.
+/// `plan_first` starts a Claude pane in plan mode (`--permission-mode plan`, see
+/// `agent::tui_plan_args`).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn session_start(
@@ -237,11 +239,15 @@ pub async fn session_start(
     custom_command: Option<String>,
     mode: Option<String>,
     hooks: Option<bool>,
+    plan_first: Option<bool>,
 ) -> Res<String> {
     let p = project(&state, &project_id)?;
     if mode.as_deref() == Some("pane") {
         let agent_id = agent_id.as_deref().unwrap_or("claude");
-        let tui = agent::tui_command(agent_id).map_err(missing)?;
+        let mut tui = agent::tui_command(agent_id).map_err(missing)?;
+        if plan_first == Some(true) {
+            tui.start_in_plan_mode(agent_id);
+        }
         let plugin = if agent_id == "claude" && hooks == Some(true) {
             claude_plugin(&state.data_dir)
         } else {
