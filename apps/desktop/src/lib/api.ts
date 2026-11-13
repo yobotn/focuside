@@ -45,9 +45,9 @@ export const api = {
 
   agentList: () => invoke<AgentInfo[]>("agent_list"),
   adapterDownload: () => invoke<string>("adapter_download"),
-  /** `hooks`: the user's answer to the plugin question. Only true adds the focuside plugin to a Claude pane. */
-  sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string, mode: "chat" | "pane" = "chat", hooks = false) =>
-    invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode, hooks }),
+  /** `hooks`: turn tracking in Claude panes (the focuside plugin). `planFirst`: a Claude pane starts in plan mode. */
+  sessionStart: (projectId: string, resume: string | null, agentId: string, customCommand: string, mode: "chat" | "pane" = "chat", hooks = false, planFirst = false) =>
+    invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode, hooks, planFirst }),
   hooksInfo: () => invoke<HooksInfo>("hooks_info"),
   sessionCheckpoint: (key: string) => invoke<void>("session_checkpoint", { key }),
   claudeRoute: () => invoke<ClaudeRouteInfo | null>("claude_route"),

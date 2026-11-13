@@ -12,6 +12,7 @@
   import type { Session } from "../stores/session.svelte";
   import ChangesCard from "./ChangesCard.svelte";
   import FileIcon from "./FileIcon.svelte";
+  import { SidebarSimple } from "phosphor-svelte";
 
   let { session, project }: { session: Session; project: Project } = $props();
 
@@ -24,16 +25,24 @@
   // Cards beside the terminal when there is room for both; above it otherwise.
   const side = $derived(width >= 980);
   const name = $derived(app.agentName(session.agent));
-  const note = $derived(session.agent === "claude" ? t("pane.noteClaude") : t("pane.note", { agent: name }));
+  // Claude: how to reach plan mode. FocusIDE never types into the pane, so the user switches.
+  const hint = $derived(session.agent !== "claude" ? "" : session.panePlan ? t("pane.modeHintPlan") : t("pane.modeHint"));
   const cards = $derived(session.entries.filter((e) => e.t === "changes" || e.t === "note" || e.t === "panePlan"));
+  const changesCount = $derived(cards.filter((e) => e.t === "changes").length);
   const hookMode = $derived(session.hooksLive || session.hooksExpected);
   const MAX_STEPS = 6;
+  const showCards = $derived(app.layout.turnsVisible && (side || cards.length > 0));
+
+  function toggleCards() {
+    app.layout.turnsVisible = !app.layout.turnsVisible;
+    app.save();
+  }
 
   const status = $derived.by(() => {
     if (pane?.exited || (!session.paneAlive && session.status === "ready")) return { text: t("pane.exited", { agent: name }), tone: "muted" };
     switch (session.tracking) {
       case "on":
-        return { text: session.turnSource === "hook" ? t("pane.trackingHook", { agent: name }) : t("pane.tracking"), tone: "muted" };
+        return { text: session.turnSource === "hook" ? t("pane.trackingHook") : t("pane.tracking"), tone: "muted" };
       case "otherRunning":
         return { text: hookMode ? t("pane.notTrackedHook") : t("pane.notTracked"), tone: "warn" };
       case "waiting":
@@ -67,7 +76,7 @@
 
 <div class="view" class:side bind:clientWidth={width}>
   <div class="bar">
-    <span class="note truncate" title={note}>{note}</span>
+    {#if hint}<span class="note truncate" title={t("pane.modeHintAlt")}>{hint}</span>{/if}
     <span class="flex-1"></span>
     <span class="status truncate" class:text-warn={status.tone === "warn"} title={status.text}>{status.text}</span>
     <button
@@ -81,11 +90,21 @@
     >
       {t("pane.checkpoint")}
     </button>
+    <button
+      class="btn"
+      aria-pressed={app.layout.turnsVisible}
+      title={app.layout.turnsVisible ? t("pane.hideTurns") : t("pane.showTurns")}
+      onclick={toggleCards}
+    >
+      <SidebarSimple size={14} mirrored />
+      {t("pane.cards")}
+      {#if !app.layout.turnsVisible && changesCount}<span class="count">{changesCount}</span>{/if}
+    </button>
   </div>
   <div class="body">
     <div class="term" bind:this={host}></div>
-    {#if side || cards.length}
-      <aside class="cards" bind:this={cardsEl} aria-label={t("pane.cards")}>
+    {#if showCards}
+      <aside class="cards" class:empty={!cards.length} bind:this={cardsEl} aria-label={t("pane.cards")}>
         {#if !cards.length}
           <p class="text-fg-muted">{hookMode ? t("pane.cardsEmptyHooks") : t("pane.cardsEmpty")}</p>
         {/if}
@@ -216,6 +235,17 @@
     max-height: none;
     border-bottom: 0;
     border-inline-start: 1px solid var(--border);
+  }
+  .side .cards.empty {
+    width: 220px;
+  }
+  .count {
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--bg-active);
+    font-size: 11px;
+    text-align: center;
   }
   .plan {
     border: 1px solid var(--border);

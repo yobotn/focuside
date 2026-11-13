@@ -14,9 +14,9 @@
   import MessageBox from "./lib/components/MessageBox.svelte";
   import Rail from "./lib/components/Rail.svelte";
   import UndoDialog from "./lib/components/UndoDialog.svelte";
-  import HooksConsent from "./lib/components/HooksConsent.svelte";
   import ChatConsent from "./lib/components/ChatConsent.svelte";
   import FileTree from "./lib/components/FileTree.svelte";
+  import SidePanel from "./lib/components/SidePanel.svelte";
   import Viewer from "./lib/components/Viewer.svelte";
   import SearchPanel from "./lib/components/SearchPanel.svelte";
   import Settings from "./lib/components/Settings.svelte";
@@ -161,7 +161,7 @@
     ];
     for (const a of app.agents) {
       if (a.path && a.id !== app.settings.agent)
-        items.push({ id: `new-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), detail: agentNote(a.id) || undefined, run: () => app.newSession(undefined, a.id, "chat") });
+        items.push({ id: `new-${a.id}`, label: t("cmd.newSessionWith", { name: a.name }), run: () => app.newSession(undefined, a.id, "chat") });
       if (a.path && a.tui)
         items.push({ id: `pane-${a.id}`, label: t("cmd.openPane", { name: a.name }), run: () => app.newSession(undefined, a.id, "pane") });
     }
@@ -220,8 +220,8 @@
 
   function onkeydown(e: KeyboardEvent) {
     const target = document.activeElement;
-    // The terminal keeps its keys. Only Mod+` and Ctrl+Shift+key reach the app.
-    if (inTerminal(target) && !(mod(e) && e.key === "`") && !(e.ctrlKey && e.shiftKey)) return;
+    // The terminal keeps its keys. Only Mod+`, Ctrl+Tab and Ctrl+Shift+key reach the app.
+    if (inTerminal(target) && !(mod(e) && e.key === "`") && !(e.ctrlKey && e.shiftKey) && !(e.ctrlKey && e.key === "Tab")) return;
     const k = e.key.toLowerCase();
     if (mod(e) && !e.shiftKey && k === "k") app.overlay = app.overlay === "palette" ? null : "palette";
     else if (mod(e) && !e.shiftKey && k === "p") app.overlay = "openFile";
@@ -231,6 +231,9 @@
     else if (mod(e) && k === "b") toggleFiles();
     else if (mod(e) && e.key === "`") app.terminalVisible = !app.terminalVisible;
     else if (mod(e) && e.key === ".") app.stop();
+    // Sessions: Ctrl+Tab and Ctrl+Shift+Tab cycle (Ctrl on every OS), Mod+1 to Mod+9 pick one.
+    else if (e.ctrlKey && !e.altKey && e.key === "Tab") app.cycleSession(e.shiftKey ? -1 : 1);
+    else if (mod(e) && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key) && !inTerminal(target)) app.showSessionAt(Number(e.key) - 1);
     else if (mod(e) && e.key === "Enter" && !(target instanceof HTMLTextAreaElement)) {
       const plan = session?.waitingPlan;
       if (session && plan) app.runPlan(session, plan);
@@ -270,7 +273,9 @@
         <Splitter edge="left" value={app.layout[widthKey(p)]} min={p === "files" ? 160 : 320} max={maxWidth(p)} onchange={(v, d) => resize(p, v, d)} onreset={() => resize(p, defaultLayout[widthKey(p)], true)} />
       {/if}
       <div class="panel" style="width: {Math.min(app.layout[widthKey(p)], maxWidth(p)())}px">
-        {#if p === "files"}<FileTree {project} />{:else}<Viewer {project} />{/if}
+        {#if p === "files"}
+          {#if app.settings.sessionTabs === "side"}<SidePanel {project} />{:else}<FileTree {project} />{/if}
+        {:else}<Viewer {project} />{/if}
       </div>
       {#if edge === "right"}
         <Splitter edge="right" value={app.layout[widthKey(p)]} min={p === "files" ? 160 : 320} max={maxWidth(p)} onchange={(v, d) => resize(p, v, d)} onreset={() => resize(p, defaultLayout[widthKey(p)], true)} />
@@ -337,10 +342,6 @@
 
 {#if app.undoTarget}
   <UndoDialog target={app.undoTarget} />
-{/if}
-
-{#if app.hooksAsk}
-  <HooksConsent onanswer={(yes) => app.hooksAsk?.(yes)} />
 {/if}
 
 {#if app.chatAsk}

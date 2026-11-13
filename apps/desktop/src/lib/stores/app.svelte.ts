@@ -34,8 +34,11 @@ export interface Settings {
   autoUpdate: boolean;
   showIgnored: boolean;
   notifications: boolean;
-  /** The user's answer to "add an observe-only plugin to Claude panes". Null: not asked yet. */
-  claudeHooks: boolean | null;
+  /** Turn tracking in Claude panes: start them with the focuside plugin (--plugin-dir). On by
+   * default. v0.2.0 stored null before its one-time question; null counts as on. */
+  claudeHooks: boolean;
+  /** Where the session tabs are: a strip in the identity bar, or a list in the side panel. */
+  sessionTabs: SessionTabs;
   /** Agent ids whose chat mode the user confirmed once after a terms note (see CHAT_CONFIRM). */
   chatConfirmed: string[];
 }
@@ -56,6 +59,7 @@ export function agentNote(id: string): string {
 }
 
 export type Side = "left" | "right";
+export type SessionTabs = "top" | "side";
 
 /** Panel sizes and sides. Widths in pixels. */
 export interface Layout {
@@ -64,9 +68,21 @@ export interface Layout {
   terminalHeight: number;
   filesSide: Side;
   viewerSide: Side;
+  /** The side panel view when session tabs are on the side. */
+  sideView: "files" | "sessions";
+  /** The Turns column beside an agent pane. */
+  turnsVisible: boolean;
 }
 
-export const defaultLayout: Layout = { filesWidth: 248, viewerWidth: 640, terminalHeight: 260, filesSide: "left", viewerSide: "right" };
+export const defaultLayout: Layout = {
+  filesWidth: 248,
+  viewerWidth: 640,
+  terminalHeight: 260,
+  filesSide: "left",
+  viewerSide: "right",
+  sideView: "files",
+  turnsVisible: true,
+};
 
 interface Persisted {
   recent: { path: string; name: string; opened: number }[];
@@ -87,7 +103,7 @@ const defaults: Persisted = {
   sessions: {},
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: null, chatConfirmed: [] },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, sessionTabs: "top", chatConfirmed: [] },
   filesVisible: true,
   layout: { ...defaultLayout },
 };
@@ -124,8 +140,6 @@ class AppStore {
   terminalCommand = $state<string | null>(null);
   focused = $state(true);
   toast = $state<{ text: string; tone: "muted" | "error" } | null>(null);
-  /** Set while the plugin question for Claude panes is shown; called with the answer. */
-  hooksAsk = $state<((yes: boolean) => void) | null>(null);
   /** Set while the terms note before chat mode is shown (CHAT_CONFIRM); called with the choice. */
   chatAsk = $state<{ agent: string; answer: (choice: "chat" | "pane" | null) => void } | null>(null);
   /** Undo dialog target. */
@@ -178,6 +192,9 @@ class AppStore {
       this.history = st.history;
       this.savedSessions = st.sessions;
       this.settings = st.settings;
+      // Turn tracking is on unless the user turned it off (v0.2.0 stored null before asking).
+      if (typeof this.settings.claudeHooks !== "boolean") this.settings.claudeHooks = true;
+      if (this.settings.sessionTabs !== "side") this.settings.sessionTabs = "top";
       this.filesVisible = st.filesVisible;
       this.layout = { ...defaultLayout, ...(raw?.layout ?? {}) };
       applyTheme(this.settings.theme);
@@ -416,17 +433,20 @@ class AppStore {
         m = choice;
       }
       if (this.active !== p) return;
-      const hooks = m === "pane" && agent === "claude" ? await this.claudeHooks() : false;
-      if (this.active !== p) return;
+      // Claude panes: turn tracking (the focuside plugin) and Plan first (plan mode at start).
+      const claudePane = m === "pane" && agent === "claude";
+      const hooks = claudePane && this.settings.claudeHooks;
+      const planFirst = claudePane && this.planFirst;
       const key =
         m === "pane"
-          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane", hooks)
+          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane", hooks, planFirst)
           : await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
       const s = new Session(key, p.id, p.root, resume);
       s.agent = agent;
       s.mode = m;
       s.status = "starting";
       s.replaying = !!resume && m === "chat";
+      s.panePlan = planFirst;
       if (m === "pane" && !resume) {
         // A pane has no ACP session id. FocusIDE's own id lets the sessions list reopen it.
         s.acpId = `pane-${key}`;
@@ -472,19 +492,6 @@ class AppStore {
     });
   }
 
-  /** The plugin answer for a new Claude pane. Asks once; Settings can change it later. */
-  private claudeHooks(): Promise<boolean> {
-    if (this.settings.claudeHooks !== null) return Promise.resolve(this.settings.claudeHooks);
-    return new Promise((resolve) => {
-      this.hooksAsk = (yes) => {
-        this.hooksAsk = null;
-        this.settings.claudeHooks = yes;
-        this.save();
-        resolve(yes);
-      };
-    });
-  }
-
   showSession(key: string) {
     for (const p of this.projects) {
       if (p.sessions.some((s) => s.key === key)) {
@@ -495,6 +502,21 @@ class AppStore {
     this.clearSeen();
     this.updateTitle();
     this.save();
+  }
+
+  /** Ctrl+Tab and Ctrl+Shift+Tab: the next or previous session of the active project. */
+  cycleSession(step: 1 | -1) {
+    const p = this.active;
+    if (!p || p.sessions.length < 2) return;
+    const i = p.sessions.findIndex((s) => s.key === p.activeKey);
+    const next = p.sessions[(i + step + p.sessions.length) % p.sessions.length];
+    this.showSession(next.key);
+  }
+
+  /** Mod+1 to Mod+9: the session at that place in the tabs. */
+  showSessionAt(index: number) {
+    const s = this.active?.sessions[index];
+    if (s) this.showSession(s.key);
   }
 
   async closeSession(key: string) {

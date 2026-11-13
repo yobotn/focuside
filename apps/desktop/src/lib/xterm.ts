@@ -23,7 +23,7 @@ export function decode(b64: string): Uint8Array {
 }
 
 export function newTerminal(scrollback = 5000): Terminal {
-  return new Terminal({
+  const term = new Terminal({
     fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.2,
@@ -32,4 +32,8 @@ export function newTerminal(scrollback = 5000): Terminal {
     theme: termColors(),
     scrollback,
   });
+  // Ctrl+Tab and Ctrl+Shift+Tab switch sessions. xterm.js would send them as Tab and stop the
+  // event, so it skips them and they reach the app. Shift+Tab alone still goes to the program.
+  term.attachCustomKeyEventHandler((e) => !(e.ctrlKey && e.key === "Tab"));
+  return term;
 }

@@ -3,7 +3,7 @@
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { api, type HooksInfo } from "../api";
   import { t } from "../i18n";
-  import { agentNote, app } from "../stores/app.svelte";
+  import { agentNote, app, type SessionTabs } from "../stores/app.svelte";
   import { applyTheme, type Theme } from "../theme.svelte";
   import { reportIssue, updates } from "../updates.svelte";
 
@@ -120,6 +120,19 @@
         />
       {/if}
 
+      <label for="s-tabs">{t("settings.sessionTabs")}</label>
+      <select
+        id="s-tabs"
+        value={app.settings.sessionTabs}
+        onchange={(e) => {
+          app.settings.sessionTabs = e.currentTarget.value as SessionTabs;
+          app.save();
+        }}
+      >
+        <option value="top">{t("settings.sessionTabs.top")}</option>
+        <option value="side">{t("settings.sessionTabs.side")}</option>
+      </select>
+
       <label for="s-ignored">{t("settings.ignored")}</label>
       <input
         id="s-ignored"
@@ -157,12 +170,11 @@
     </div>
 
     <div class="hooks">
-      <h3 class="mb-2 font-semibold">{t("hooks.title")}</h3>
       <label class="flex items-start gap-2">
         <input
           type="checkbox"
           class="mt-0.5"
-          checked={app.settings.claudeHooks === true}
+          checked={app.settings.claudeHooks}
           onchange={(e) => {
             app.settings.claudeHooks = e.currentTarget.checked;
             app.save();
@@ -178,7 +190,7 @@
       {/if}
       {#if hooks?.codex && hooks?.gemini}
         <details class="mt-3">
-          <summary>{t("hooks.other")}</summary>
+          <summary class="text-fg-muted">{t("hooks.other")}</summary>
           <p class="mt-2 text-fg-muted">{t("hooks.otherHint")}</p>
           {#each [{ id: "codex" as const, label: t("hooks.codexFile"), text: hooks.codex }, { id: "gemini" as const, label: t("hooks.geminiFile"), text: hooks.gemini }] as snip (snip.id)}
             <div class="mt-3 flex items-center gap-2">

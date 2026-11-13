@@ -65,7 +65,6 @@
       <div class="row">
         {#if dl}
           <p class="mb-1">{t("check.adapterDownload", { repo: dl.repo, version: dl.version, size: dl.sizeMb })}</p>
-          <p class="mb-1 muted">{t("check.adapterNote")}</p>
           <div class="flex items-center gap-2">
             <button class="btn h-6" disabled={app.adapterProgress !== null} onclick={() => app.downloadAdapter()}>
               {app.adapterProgress === null ? t("check.download") : t("check.downloading", { percent: app.adapterProgress })}
@@ -94,9 +93,6 @@
   }
   .row + .row {
     margin-top: 10px;
-  }
-  .muted {
-    color: var(--fg-muted);
   }
   .error {
     color: var(--danger);

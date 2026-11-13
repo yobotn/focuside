@@ -97,6 +97,8 @@ export class Session {
   trackingError = $state<string | null>(null);
   /** Pane: started with the focuside plugin, so hooks should report turns. */
   hooksExpected = $state(false);
+  /** Pane: started in the agent's plan mode (Plan first, Claude only). */
+  panePlan = $state(false);
   /** Pane: a hook event arrived. Turns now start on a prompt and end when the agent stops. */
   hooksLive = $state(false);
   /** Pane: the open turn came from a hook (a prompt) or from Checkpoint. */
@@ -144,6 +146,11 @@ export class Session {
 
   get model(): ConfigOption | undefined {
     return this.configOptions.find((o) => o.id === "model" || o.category === "model");
+  }
+
+  /** Working on a prompt: a chat turn, or a pane prompt that hooks reported. For the tabs. */
+  get busy(): boolean {
+    return this.mode === "pane" ? this.tracking === "on" && this.turnSource === "hook" : this.running;
   }
 
   /** True while this session holds its project for a turn that can change files. */
@@ -465,6 +472,15 @@ export class Session {
     this.updated = Date.now();
     for (const en of this.entries) {
       if (en.t === "permission" && en.state === "open") en.state = "cancelled";
+    }
+    if (r.stopReason === "authRequired") {
+      // Claude asked for a login during the prompt. A claude_route event shows the route
+      // ("Open Claude pane"); the turn leaves no card and no error line.
+      const idx = this.entries.findLastIndex((x) => x.t === "plan" && x.turnId === r.turnId && (x.state === "planning" || x.state === "waiting"));
+      if (idx >= 0) this.entries.splice(idx, 1);
+      if (r.hasSnapshot && r.changes?.files.length) this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
+      this.waiting = null;
+      return "none";
     }
     const failed = r.stopReason === "error" || !!r.error;
     const plan = this.entries.findLast((x) => x.t === "plan" && x.turnId === r.turnId);

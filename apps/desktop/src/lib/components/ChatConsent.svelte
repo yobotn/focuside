@@ -23,8 +23,7 @@
 <div class="backdrop" {onkeydown}>
   <div class="dialog" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="chat-title" aria-describedby="chat-body">
     <h2 id="chat-title" class="mb-2 text-[15px] font-semibold">{t("agent.chatConfirmTitle", { name })}</h2>
-    <p id="chat-body" class="mb-2">{t("agent.chatConfirm", { name })}</p>
-    <p class="mb-4 text-fg-muted">{t("agent.chatConfirmDetail")}</p>
+    <p id="chat-body" class="mb-4">{t("agent.chatConfirm")}</p>
     <div class="flex justify-end gap-2">
       <button class="btn" bind:this={paneBtn} onclick={() => onanswer("pane")}>{t("agent.chatConfirmPane")}</button>
       <button class="btn btn-primary" onclick={() => onanswer("chat")}>{t("agent.chatConfirmYes")}</button>

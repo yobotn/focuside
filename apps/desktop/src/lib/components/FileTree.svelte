@@ -15,7 +15,8 @@
     ignored: boolean;
   }
 
-  let { project }: { project: Project } = $props();
+  // `head`: false when the side panel draws its own header (Session tabs: Side).
+  let { project, head = true }: { project: Project; head?: boolean } = $props();
 
   let children = $state<Record<string, Node[]>>({});
   let expanded = $state<Record<string, boolean>>({});
@@ -116,17 +117,19 @@
 </script>
 
 <aside class="files">
-  <div class="head">
-    <span class="flex-1">{t("files.title")}</span>
-    <button
-      class="icon-btn move"
-      onclick={() => app.movePanel("files")}
-      title={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
-      aria-label={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
-    >
-      <ArrowsLeftRight size={12} />
-    </button>
-  </div>
+  {#if head}
+    <div class="head">
+      <span class="flex-1">{t("files.title")}</span>
+      <button
+        class="icon-btn move"
+        onclick={() => app.movePanel("files")}
+        title={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
+        aria-label={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
+      >
+        <ArrowsLeftRight size={12} />
+      </button>
+    </div>
+  {/if}
   {#if pinned}
     <button class="row pinned" class:on={viewing === pinned.path} onclick={() => open(pinned)}>
       <PushPin size={12} class="shrink-0 text-fg-faint" />
