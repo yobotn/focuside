@@ -207,6 +207,8 @@ Replace the `externalBin` sidecar with a first-use download from the pinned upst
 
 ### Phase 3: observe-only hook integration
 
+Status (2026-11-13): done with delivery Option A. Decisions, checks and open points are in PLAN.md, section 10, "Hooks (Phase 3, 2026-11-13)". One change from this table: the helper sits in the plugin folder under `hook/`, not `bin/`, because a plugin's `bin/` folder goes on the PATH of Claude's Bash tool.
+
 | Change | Files |
 | --- | --- |
 | A small `focuside-hook` helper that reads hook JSON on stdin and appends selected fields to a file under `$FOCUSIDE_EVENTS`. It exits 0 when the variable is missing, prints nothing to stdout or stderr in every case, always exits 0, reads no other env var, and finishes fast (the `UserPromptSubmit` default timeout is 30 seconds, and the hook blocks the prompt until it returns). A unit test checks the empty stdout | new crate `crates/hook` or a bin in `crates/spike`; shipped as a sidecar and copied into the `--plugin-dir` folder |

@@ -360,7 +360,7 @@
       <svg class="ic"><use href="#i-info"/></svg>
       <div>
         <p><b>Chat mode with Claude needs an API key or a cloud provider.</b> Chat mode runs through the Claude Agent SDK, and Anthropic asks apps built on it to use an API key (<code>ANTHROPIC_API_KEY</code>) or a cloud provider (Amazon Bedrock, Google Vertex AI, Microsoft Foundry).</p>
-        <p><b>With a Claude plan (Pro, Max, Team, Enterprise), Claude opens in a Claude pane.</b> The pane runs the unmodified <code>claude</code> terminal app, with its own login, and you type every prompt there. FocusIDE shows the changes of each turn after Checkpoint, with Undo turn. FocusIDE never sees your key or your login.</p>
+        <p><b>With a Claude plan (Pro, Max, Team, Enterprise), Claude opens in a Claude pane.</b> The pane runs the unmodified <code>claude</code> terminal app, with its own login, and you type every prompt there. FocusIDE shows the changes of each turn with Undo turn. With FocusIDE's optional observe-only plugin, each prompt is one turn, with the plan and a short summary. Without it, Checkpoint ends a turn. FocusIDE never sees your key or your login.</p>
         <p><a href="https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use">Read Anthropic's rules</a></p>
       </div>
     </aside>
