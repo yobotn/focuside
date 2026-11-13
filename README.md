@@ -103,7 +103,7 @@ flowchart LR
 > - an API key in `ANTHROPIC_API_KEY`, from the [Claude Console](https://platform.claude.com/settings/keys), or
 > - Amazon Bedrock, Google Vertex AI or Microsoft Foundry.
 >
-> **With a Claude plan (Pro, Max, Team, Enterprise), Claude opens in a Claude pane.** The pane runs the unmodified `claude` terminal app in the center view, with its own login. You type every prompt there. FocusIDE shows the changes of each turn with Undo turn. If you allow FocusIDE's observe-only plugin (it asks once, and Settings can turn it off), each prompt is one turn, and the cards also show the plan and a short summary. Without the plugin, select Checkpoint to end a turn. Any installed agent with a terminal app can open in a pane (palette: "Open <agent> in a pane").
+> **With a Claude plan (Pro, Max, Team, Enterprise), Claude opens in a Claude pane.** The pane runs the unmodified `claude` terminal app in the center view, with its own login. You type every prompt there. FocusIDE shows the changes of each turn with Undo turn. Turn tracking is on by default: FocusIDE starts its Claude panes with an observe-only plugin (`--plugin-dir`, for that pane only; your Claude settings do not change), so each prompt is one turn, and the cards also show the plan and a short summary. Settings > "Turn tracking in Claude panes" turns it off; then select Checkpoint to end a turn. With Plan first on, Claude panes start in plan mode (`--permission-mode plan`); Shift+Tab in Claude changes the mode. Any installed agent with a terminal app can open in a pane (palette: "Open <agent> in a pane").
 >
 > Claude Code reads the key and runs its own login. FocusIDE never reads or stores credentials. See [Anthropic's rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) and [docs/agent-terms.md](docs/agent-terms.md).
 
@@ -143,6 +143,8 @@ Plan first needs an agent with a plan mode. Snapshots, the scope guard and Undo 
 | <kbd>Ctrl</kbd>+<kbd>.</kbd> | Stop the running turn |
 | <kbd>Ctrl</kbd>+<kbd>J</kbd> | Waiting queue, across projects |
 | <kbd>Ctrl</kbd>+<kbd>E</kbd> | Sessions in this project |
+| <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd> | Next or previous session tab (Ctrl on macOS too) |
+| <kbd>Ctrl</kbd>+<kbd>1</kbd> to <kbd>9</kbd> | Go to session tab 1 to 9 |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | Show or hide the file tree |
 | <kbd>Ctrl</kbd>+<kbd>`</kbd> | Show or hide the terminal |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the file in the viewer |

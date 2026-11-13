@@ -219,7 +219,7 @@ Gap we fill: one calm app built around reading and approving agent work, with a 
 ```
 
 - **Rail** (far left): one colored monogram per open project (KR = keeprun, RS = rigsweep). Click to switch project. Amber dot when a session there waits for you. "+" opens a folder.
-- **Identity bar** (top): project, branch, session name, agent and model (click to change model), context usage when the adapter reports it, waiting count.
+- **Identity bar** (top): project, branch, session tabs (or the session name when Session tabs is Side), agent and model (click to change model), context usage when the adapter reports it, waiting count.
 - **Window title:** `project - session name - FocusIDE`, plus the total waiting count, so the taskbar, Dock and Alt+Tab show it.
 - **Files** (left): open by default, Mod+B hides it. CLAUDE.md pinned at the top when it exists.
 - **Conversation** (center): max 760px wide, reads like a document. Tool calls show as one line ("Read src/main.rs"). Long conversations use a virtualized list.
@@ -301,6 +301,8 @@ Mod is Ctrl on Windows and Linux, Cmd on macOS.
 | Undo turn | U (changes card focused), or palette |
 | Waiting queue | Mod+J |
 | Sessions | Mod+E |
+| Next or previous session tab | Ctrl+Tab, Ctrl+Shift+Tab (Ctrl on every OS; also from a terminal or pane) |
+| Session tab 1 to 9 | Mod+1 to Mod+9 |
 | Files | Mod+B |
 | Terminal | Mod+` |
 
@@ -569,7 +571,7 @@ Phase 2 of [docs/agent-terms.md](docs/agent-terms.md). A session can run in pane
 | PTY exit is taken from the process (`child.wait`), then the reader gets 400 ms to drain | ConPTY keeps the output pipe open after the program exits until the pseudo console closes, so reader EOF alone missed exits |
 | A saved pane session (`SavedSession.mode = "pane"`, with a FocusIDE id `pane-<key>` in `acpId`) reopens as a fresh TUI. No resume flag is passed | Resume flags differ per agent and were not checked |
 | The plan card and the turn summary are not shown in panes. The cards column says they need hooks | They come from hook data. Phase 3 adds them, see "Hooks (Phase 3, 2026-11-13)" below |
-| Product labels say "Claude" ("Claude pane", "Open Claude pane"). The pane note says "Claude Code runs with its own login. Billing and limits follow your Claude plan and Anthropic's terms."; other agents get a generic line | Naming rule; policy change risk |
+| Product labels say "Claude" ("Claude pane", "Open Claude pane"). The pane note said "Claude Code runs with its own login. Billing and limits follow your Claude plan and Anthropic's terms."; other agents got a generic line. Removed on 2026-11-13 (owner feedback, below) | Naming rule; policy change risk |
 
 TUI commands (`AgentSpec.tui_program`, `tui_args`):
 
@@ -607,7 +609,7 @@ Phase 3 of [docs/agent-terms.md](docs/agent-terms.md): observe-only hooks for pa
 | Delivery Option A only: FocusIDE writes the plugin `focuside` into `<app data>/claude-plugin/focuside/` for the current OS (`.claude-plugin/plugin.json`, `hooks/hooks.json`, `hook/focuside-hook[.exe]`) and starts Claude panes with `--plugin-dir <that folder>`. No marketplace, nothing in `~/.claude`, nothing in the project | Plugin and app versions always match. The flag loads a plugin "for this session only" |
 | `hooks/hooks.json` wraps the events in a top-level `"hooks"` key and uses exec form (`command` plus `args`, `${CLAUDE_PLUGIN_ROOT}/hook/focuside-hook.exe`, `args: ["claude"]`, timeout 10 s). Events: UserPromptSubmit, Stop, StopFailure, PreToolUse (matcher `ExitPlanMode`), PostToolUse (matcher `ExitPlanMode\|Bash\|PowerShell\|Edit\|Write\|MultiEdit\|NotebookEdit`). No SessionStart, no UserPromptExpansion, no skills, agents, output style or MCP, no `async`, `asyncRewake` or `additionalContext`. A test checks this | Exec form spawns the helper with no shell, so paths with spaces work and bash and PowerShell differences do not matter. The docs say exec form on Windows needs a real `.exe` |
 | The helper sits in `hook/`, not `bin/` | The plugin docs: files in a plugin's `bin/` are on the PATH of Claude's Bash tool, so Claude could see and run them |
-| Consent: before the first Claude pane FocusIDE asks "Let FocusIDE add an observe-only plugin to Claude panes in FocusIDE? It only reports when a turn starts and ends. It does not change your Claude settings." The answer is the `claudeHooks` setting. Settings has a Hooks section below the rows with the switch | Adding a launch flag needs consent. The section sits below the rows, like "About", so "Settings max 6 rows" still holds |
+| Reversed on 2026-11-13, see "Owner feedback after v0.2.0" below. Consent: before the first Claude pane FocusIDE asks "Let FocusIDE add an observe-only plugin to Claude panes in FocusIDE? It only reports when a turn starts and ends. It does not change your Claude settings." The answer is the `claudeHooks` setting. Settings has a Hooks section below the rows with the switch | Adding a launch flag needs consent. The section sits below the rows, like "About", so "Settings max 6 rows" still holds |
 | Every pane gets `FOCUSIDE_EVENTS=<app data>/projects/<id>/events/<session>`, also without consent. The folder is emptied when the pane starts and removed when it closes. A notify watcher per pane (50 ms debounce) reads the files in name order, deletes them and hands them to the pane one at a time. Events whose agent is not the pane's agent are ignored | The variable alone does nothing. It lets hooks the user added for Codex or Gemini CLI report turns. Nothing is written to the user's repo |
 | Turns with hooks: UserPromptSubmit ends any open turn and starts one; Stop and StopFailure end it. The pane holds the project claim only in between. The next UserPromptSubmit (Stop does not fire after an interrupt), Checkpoint, pane exit and pane close also release it. A prompt that arrives while another session holds the claim records no turn and shows "This turn was not tracked because another session was running." | Fixes the Phase 2 claim problem: an idle pane no longer blocks chat turns in the project |
 | A pane started with the plugin starts no turn when it opens. Until the first hook event arrives, Checkpoint starts and ends turns by hand, as in Phase 2. The status says "Turn tracking starts with your first prompt. If no turn shows up, hooks did not run. Then use Checkpoint." Panes without the plugin keep the Phase 2 rules until a hook event arrives | FocusIDE cannot tell that hooks are blocked (`disableAllHooks`, `allowManagedHooksOnly`, workspace trust) until a prompt shows no event |
@@ -659,6 +661,26 @@ Phase 4 of [docs/agent-terms.md](docs/agent-terms.md): seven more agents, per-ag
 | Windows npm shims that point at an `.mjs` file or an extensionless node script now resolve to `node <script>` (`which::is_node_script`) | Kimi Code's bin is `dist/main.mjs` and Cline's is `bin/cline` with a node shebang; before this, both stayed as `.cmd` paths |
 
 Not done in Phase 4: running any new agent live on Windows (none installed); hook names for Antigravity, Copilot, Cursor and Kiro panes (they use Checkpoint); Cursor's `cursor/create_plan` and `cursor/update_todos` ACP extensions in the plan card; a "Preview" badge for Copilot beyond its note line; reading versions or install hints from the registry at run time.
+
+### Owner feedback after v0.2.0 (2026-11-13)
+
+The owner asked for clear tabs, a plan mode for Claude panes, and short messages without justification.
+
+| Decision | Why |
+|---|---|
+| Session tabs replace the unlabeled dots. A tab shows the name ("Untitled" when there is none), the agent (with a terminal icon for a pane), and a dot: green while it works (a chat turn, or a pane prompt reported by hooks), amber while it waits. Close button on hover (hidden when it is the only session), middle click closes, double click renames. "+" and the new session menu stay | Owner request. Dots did not say which session is which |
+| Setting "Session tabs: Top / Side". Top: a strip in the identity bar that scrolls sideways (mouse wheel too) and keeps the active tab in view. Side: the files panel gets a Files / Sessions switch in its header; Sessions lists the open sessions with the same tabs, "+", the new session menu and "Earlier sessions" (Mod+E). The view is kept in `layout.sideView` | Owner request |
+| Settings now has 8 rows (theme, font size, shell, default agent, session tabs, show ignored files, notifications, automatic updates). Deviation from "Settings max 6 rows", at the owner's request. The turn tracking switch sits below the rows | Owner asked for this setting |
+| Ctrl+Tab and Ctrl+Shift+Tab cycle the sessions of the project, Mod+1 to Mod+9 pick one. Ctrl+Tab uses Ctrl on macOS too (Cmd+Tab is the system app switcher). xterm.js skips Ctrl+Tab (`attachCustomKeyEventHandler`), so it works from the terminal drawer and agent panes; Shift+Tab alone still reaches the program. Mod+digit does not reach the app from a terminal | Both were free |
+| Plan first applies to Claude panes: a new Claude pane starts with `claude --permission-mode plan` (`agent::tui_plan_args`, listed in `claude --help` of Claude Code 2.1.323). The pane header shows "Press Shift+Tab in Claude to switch to plan mode." (or "Plan mode is on..." when it started in plan mode), with "If Shift+Tab does nothing, press Alt+M." as the tooltip. The keys come from the Claude Code interactive mode docs ("Shift+Tab, or Alt+M on Windows when the Node or Bun runtime doesn't enable VT input mode"). The palette's "Turn Plan first on or off" sets it for both modes. FocusIDE still never types into a pane | The flag is a normal launch option: no login method, no `-p`, no `--bare`, no system prompt. The forbidden flag test now also checks the plan arguments |
+| Turn tracking replaces the one-time plugin question. Claude panes get the focuside plugin (`--plugin-dir`, only for panes FocusIDE starts; the user's Claude settings do not change) unless Settings > "Turn tracking in Claude panes" is off. The `claudeHooks` setting is now a boolean: null (v0.2.0 users who were never asked) counts as on, an explicit off stays off. The Codex and Gemini CLI snippets sit in a closed disclosure below the switch. HooksConsent is gone | Owner request. This reverses the "one-time consent" decision in "Hooks (Phase 3, 2026-11-13)" |
+| Messages: short, direct, no billing or terms explanations on screens the user sees all the time. The pane note about logins and billing is gone. The Claude chat route leads with "Open Claude pane" and one line, "Chat mode needs an API key."; key and cloud steps are under "Use an API key instead". Agent data and terms notes are one sentence each and show only in Settings and the new session menu (no longer in the palette). The Turns column says "Changes from each prompt show here." (with hooks) or "Changes show here after each Checkpoint." | Owner: "I do not like justification, I want clear messages." |
+| The Turns column beside a pane can be hidden with a "Turns" button in the pane header (kept in `layout.turnsVisible`; the button shows the number of changes cards while hidden). Empty, it is 220 px wide instead of 380 px | Owner request |
+| An "authentication required" answer to a chat prompt (not only at session start) gets the Claude route: `Session::finish_turn` emits `claude_route` (Subscription when the adapter says the plan is not supported, else what `claude auth status` reports, else SignedOut) and ends the turn with stop reason `authRequired` and no error line. Other agents keep the error text | The raw "Authentication required" gave no next step |
+
+Verified: `npm run lint`, `npm test` (new tests: plan arguments are allowed and not forbidden, `start_in_plan_mode`, the adapter refusal check), `svelte-check`. Live, ignored: `cargo test -p focuside-desktop -- --ignored real_claude_tui_in_plan_mode` starts the Claude TUI with `--permission-mode plan` in a PTY and closes it.
+
+Not verified: the app window was not clicked through (tabs, side panel, Ctrl+Tab in a pane, the Turns toggle and the new Claude route panel were checked by svelte-check and a dev build only). Whether Shift+Tab reaches Claude through xterm.js and ConPTY on Windows, or Alt+M is needed.
 
 ## 11. Open items
 

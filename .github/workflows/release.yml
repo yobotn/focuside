@@ -70,7 +70,7 @@ jobs:
 
             Chat mode downloads the claude-agent-acp connector from its GitHub release (agentclientprotocol/claude-agent-acp) the first time you use it, after you agree.
 
-            Claude panes can use an observe-only plugin that reports when a turn starts and ends. FocusIDE asks before it adds the plugin, and you can turn it off in Settings.
+            Claude panes track turns with an observe-only plugin that FocusIDE passes with --plugin-dir to the panes it starts. It is on by default and does not change your Claude settings. Turn it off in Settings.
 
             New agents: Antigravity CLI, Copilot CLI, Cursor CLI, Kiro CLI, Cline, Kimi Code and Mistral Vibe. Install them yourself; FocusIDE does not install agents. Antigravity CLI opens in a pane, and FocusIDE asks once before chat mode.
 
