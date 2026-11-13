@@ -68,6 +68,50 @@ pub fn agent_arg(arg: Option<&str>) -> String {
     }
 }
 
+/// The most todo items kept from one TodoWrite call.
+const MAX_TODOS: usize = 100;
+
+/// The todo list change of a PostToolUse event (Claude Code's task tools, checked against the
+/// Agent SDK tool types on 2026-11-13). Newer models have no task tools unless the user opts
+/// in, so these events may never come.
+/// - TodoWrite: the whole list, `tool_input.todos` with `content` and `status`.
+/// - TaskCreate: one new task, `tool_input.subject`; the id is in `tool_response.task.id`.
+/// - TaskUpdate: `tool_input.taskId` (also `id` or `task_id`), optional `status` (including
+///   "deleted") and `subject`.
+fn todo_fields(tool: &str, input: &Value, response: &Value) -> Option<Value> {
+    let short = |v: &Value| text(v, MAX_SHORT);
+    match tool {
+        "TodoWrite" => {
+            let items: Vec<Value> = input["todos"]
+                .as_array()?
+                .iter()
+                .filter_map(|t| {
+                    Some(json!({ "content": short(&t["content"])?, "status": short(&t["status"]) }))
+                })
+                .take(MAX_TODOS)
+                .collect();
+            Some(json!({ "kind": "list", "items": items }))
+        }
+        "TaskCreate" => Some(json!({
+            "kind": "create",
+            "id": short(&response["task"]["id"]),
+            "subject": short(&input["subject"]).or_else(|| short(&response["task"]["subject"]))?,
+        })),
+        "TaskUpdate" => {
+            let id = ["taskId", "id", "task_id"]
+                .iter()
+                .find_map(|k| short(&input[*k]))?;
+            Some(json!({
+                "kind": "update",
+                "id": id,
+                "status": short(&input["status"]),
+                "subject": short(&input["subject"]),
+            }))
+        }
+        _ => None,
+    }
+}
+
 /// The event FocusIDE stores for one hook input, or None when the input is not JSON or the
 /// event is not one FocusIDE uses.
 pub fn event_from(input: &[u8], agent: &str) -> Option<Value> {
@@ -79,6 +123,11 @@ pub fn event_from(input: &[u8], agent: &str) -> Option<Value> {
     out.insert("event".into(), json!(name));
     if let Some(s) = text(&v["session_id"], 200) {
         out.insert("sessionId".into(), s);
+    }
+    // Claude Code's permission mode ("default", "plan", "acceptEdits", "auto", ...), a common
+    // input field that not every event has. The pane shows it next to its mode button.
+    if let Some(s) = text(&v["permission_mode"], 40) {
+        out.insert("mode".into(), s);
     }
     match name {
         "Stop" => {
@@ -113,6 +162,11 @@ pub fn event_from(input: &[u8], agent: &str) -> Option<Value> {
                 };
                 if let Some(s) = text(plan, MAX_TEXT) {
                     out.insert("plan".into(), s);
+                }
+            }
+            if name == "PostToolUse" {
+                if let Some(todo) = todo_fields(tool, input, &v["tool_response"]) {
+                    out.insert("todo".into(), todo);
                 }
             }
             for key in ["file_path", "notebook_path", "path"] {
@@ -231,6 +285,58 @@ mod tests {
             "claude",
         );
         assert_eq!(e["command"], "cargo test");
+    }
+
+    #[test]
+    fn permission_mode_and_todos() {
+        let e = ev(
+            json!({"hook_event_name": "UserPromptSubmit", "permission_mode": "plan"}),
+            "claude",
+        );
+        assert_eq!(e["mode"], "plan");
+
+        let e = ev(
+            json!({"hook_event_name": "PostToolUse", "tool_name": "TodoWrite", "permission_mode": "acceptEdits",
+            "tool_input": {"todos": [
+                {"content": "Add tests", "status": "completed", "activeForm": "Adding tests"},
+                {"content": "Fix bug", "status": "in_progress", "activeForm": "Fixing bug"},
+                {"status": "pending"}
+            ]}}),
+            "claude",
+        );
+        assert_eq!(e["mode"], "acceptEdits");
+        assert_eq!(e["todo"]["kind"], "list");
+        let items = e["todo"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2, "items without content are dropped");
+        assert_eq!(items[1]["content"], "Fix bug");
+        assert_eq!(items[1]["status"], "in_progress");
+
+        let e = ev(
+            json!({"hook_event_name": "PostToolUse", "tool_name": "TaskCreate",
+                "tool_input": {"subject": "Write docs", "description": "long"},
+                "tool_response": {"task": {"id": "3", "subject": "Write docs"}}}),
+            "claude",
+        );
+        assert_eq!(
+            e["todo"],
+            json!({"kind": "create", "id": "3", "subject": "Write docs"})
+        );
+        assert!(e.get("description").is_none());
+
+        let e = ev(
+            json!({"hook_event_name": "PostToolUse", "tool_name": "TaskUpdate",
+                "tool_input": {"task_id": "3", "status": "completed"}}),
+            "claude",
+        );
+        assert_eq!(e["todo"]["id"], "3");
+        assert_eq!(e["todo"]["status"], "completed");
+
+        // PreToolUse carries no todo change: only the result counts.
+        let e = ev(
+            json!({"hook_event_name": "PreToolUse", "tool_name": "TodoWrite", "tool_input": {"todos": []}}),
+            "claude",
+        );
+        assert!(e.get("todo").is_none());
     }
 
     #[test]

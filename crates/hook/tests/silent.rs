@@ -74,6 +74,14 @@ const EVENTS: &[(&str, &str)] = &[
         r#"{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"/r/a"}}"#,
     ),
     (
+        "claude",
+        r#"{"hook_event_name":"PostToolUse","permission_mode":"plan","tool_name":"TodoWrite","tool_input":{"todos":[{"content":"a","status":"pending","activeForm":"A"}]}}"#,
+    ),
+    (
+        "claude",
+        r#"{"hook_event_name":"PostToolUse","tool_name":"TaskCreate","tool_input":{"subject":"a"},"tool_response":{"task":{"id":"1","subject":"a"}}}"#,
+    ),
+    (
         "codex",
         r#"{"hook_event_name":"Stop","turn_id":"t","last_assistant_message":"ok"}"#,
     ),
