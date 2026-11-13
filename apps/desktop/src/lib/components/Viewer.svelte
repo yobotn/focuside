@@ -2,14 +2,16 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { openPath } from "@tauri-apps/plugin-opener";
-  import { ArrowCounterClockwise, ArrowsLeftRight, CaretLeft, CaretRight, X } from "phosphor-svelte";
+  import { ArrowCounterClockwise, CaretLeft, CaretRight, X } from "phosphor-svelte";
   import { api, errText } from "../api";
   import { formatSize } from "../editor";
   import { t } from "../i18n";
   import { keyLabel, mod } from "../platform";
   import { app, type Project } from "../stores/app.svelte";
   import type { FileVersions } from "../types";
+  import { dock } from "../stores/dock.svelte";
   import CodeEditor from "./CodeEditor.svelte";
+  import DockGrip from "./DockGrip.svelte";
   import FileIcon from "./FileIcon.svelte";
   import ImageView from "./ImageView.svelte";
   import Markdown from "./Markdown.svelte";
@@ -205,7 +207,8 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <section class="viewer" bind:this={panel} tabindex="-1" {onkeydown} aria-label={path}>
-  <header class="head">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <header class="head" onpointerdown={(e) => dock.fromHeader("viewer", e)}>
     <FileIcon {path} size={15} />
     {#if v.kind === "diff"}
       <span class="text-fg-muted">{t("viewer.diff")}</span>
@@ -224,14 +227,7 @@
     {#if v.kind === "file" && dirty}
       <button class="btn h-6" onclick={save} title={keyLabel("Mod+S")}>{t("common.save")}</button>
     {/if}
-    <button
-      class="icon-btn"
-      onclick={() => app.movePanel("viewer")}
-      title={app.layout.viewerSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
-      aria-label={app.layout.viewerSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
-    >
-      <ArrowsLeftRight size={13} />
-    </button>
+    <DockGrip panel="viewer" />
     <button class="icon-btn" onclick={close} title="{t('viewer.close')} (Esc)" aria-label={t("viewer.close")}><X size={14} /></button>
   </header>
 

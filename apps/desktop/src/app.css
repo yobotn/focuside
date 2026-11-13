@@ -283,6 +283,29 @@ button {
   color: var(--fg);
 }
 
+/* Dragging a panel or a session tab. */
+body.docking,
+body.docking * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.reorder-marker {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.reorder-marker.x {
+  width: 2px;
+}
+.reorder-marker.y {
+  height: 2px;
+}
+.reordering {
+  opacity: 0.5;
+}
+
 .pulse-warn {
   animation: pulse-warn 1.6s ease-in-out infinite;
 }

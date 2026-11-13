@@ -2,6 +2,7 @@
   // One session as a tab: name, agent, and whether it works or waits. Used by the tab strip in
   // the identity bar (Session tabs: Top) and the Sessions view of the side panel (Side).
   // Click shows it, double click renames it, middle click or the close button closes it.
+  // Drag reorders (the list uses lib/reorder); Ctrl+Shift+Page Up or Page Down moves the active tab.
   import { TerminalWindow, X } from "phosphor-svelte";
   import { t } from "../i18n";
   import { app } from "../stores/app.svelte";
@@ -16,7 +17,7 @@
   const name = $derived(s.name || t("session.untitled"));
   const agent = $derived(app.agentName(s.agent));
   const stateText = $derived(s.waiting ? t(`queue.${s.waiting}` as const) : s.busy ? t("conv.working") : "");
-  const title = $derived([name, s.mode === "pane" ? t("pane.name", { agent }) : agent, stateText].filter(Boolean).join(" . ") + "\n" + t("session.renameHint"));
+  const title = $derived([name, s.mode === "pane" ? t("pane.name", { agent }) : agent, stateText].filter(Boolean).join(" . ") + "\n" + t("session.renameHint") + "\n" + t("session.moveHint"));
 
   function startRename() {
     draft = s.name;

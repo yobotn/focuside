@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { t } from "./lib/i18n";
   import { isMac, keyLabel, mod } from "./lib/platform";
@@ -15,7 +15,6 @@
   import Rail from "./lib/components/Rail.svelte";
   import UndoDialog from "./lib/components/UndoDialog.svelte";
   import ChatConsent from "./lib/components/ChatConsent.svelte";
-  import FileTree from "./lib/components/FileTree.svelte";
   import SidePanel from "./lib/components/SidePanel.svelte";
   import Viewer from "./lib/components/Viewer.svelte";
   import SearchPanel from "./lib/components/SearchPanel.svelte";
@@ -24,8 +23,12 @@
   import Splitter from "./lib/components/Splitter.svelte";
   import ClaudeAccess from "./lib/components/ClaudeAccess.svelte";
   import AgentPane from "./lib/components/AgentPane.svelte";
+  import PlanPanel from "./lib/components/PlanPanel.svelte";
+  import DockGroup from "./lib/components/DockGroup.svelte";
+  import DockOverlay from "./lib/components/DockOverlay.svelte";
   import { reportIssue, updates } from "./lib/updates.svelte";
-  import { defaultLayout, type Side } from "./lib/stores/app.svelte";
+  import { dock, dockHost } from "./lib/stores/dock.svelte";
+  import { DEFAULT_BOTTOM, DEFAULT_WIDTH, MIN_WIDTH, shownPanel, type DockGroup as Group, type PanelId } from "./lib/dock";
 
   let conversation: Conversation | undefined = $state();
   let messageBox: MessageBox | undefined = $state();
@@ -131,11 +134,10 @@
       { id: "queue", label: t("cmd.waiting"), hint: keyLabel("Mod+J"), run: () => (app.overlay = "queue") },
       { id: "file", label: t("cmd.openFile"), hint: keyLabel("Mod+P"), run: () => (app.overlay = "openFile") },
       { id: "search", label: t("cmd.search"), hint: keyLabel("Mod+Shift+F"), run: () => (app.overlay = "search") },
-      { id: "files", label: t("cmd.files"), hint: keyLabel("Mod+B"), run: () => toggleFiles() },
-      { id: "term", label: t("cmd.terminal"), hint: keyLabel("Mod+`"), run: () => (app.terminalVisible = !app.terminalVisible) },
+      { id: "files", label: t("cmd.files"), hint: keyLabel("Mod+B"), run: () => dock.toggle("side") },
+      { id: "term", label: t("cmd.terminal"), hint: keyLabel("Mod+`"), run: () => dock.toggle("terminal") },
+      { id: "planPanel", label: t("cmd.planPanel"), run: () => dock.toggle("plan") },
       { id: "plan", label: t("cmd.planFirst"), run: () => app.setPlanFirst(!app.planFirst) },
-      { id: "moveFiles", label: t("cmd.moveFiles"), run: () => app.movePanel("files") },
-      { id: "moveViewer", label: t("cmd.moveViewer"), run: () => app.movePanel("viewer") },
       { id: "resetLayout", label: t("cmd.resetLayout"), run: () => app.resetLayout() },
       {
         id: "update",
@@ -183,35 +185,63 @@
     })),
   );
 
-  // Panels by side. Two panels on one side: the file tree sits on the outside.
-  type Panel = "files" | "viewer";
+  // Docked panels (lib/dock). A group shows while one of its panels is visible.
   let winW = $state(window.innerWidth);
-  const showViewer = $derived(!!(project && app.viewer && app.viewer.projectId === project.id));
-  const panelsOn = (side: Side): Panel[] => {
-    const out: Panel[] = [];
-    if (app.filesVisible && app.layout.filesSide === side) out.push("files");
-    if (showViewer && app.layout.viewerSide === side) out.push("viewer");
-    return side === "left" ? out : out.reverse();
-  };
-  const leftPanels = $derived(panelsOn("left"));
-  const rightPanels = $derived(panelsOn("right"));
+  const visible = (p: PanelId) => dock.visible(p);
+  const groupsIn = (list: Group[]) => list.filter((g) => g.panels.some(visible));
+  const leftGroups = $derived(groupsIn(app.layout.dock.left));
+  const centerGroups = $derived(groupsIn(app.layout.dock.center));
+  const rightGroups = $derived(groupsIn(app.layout.dock.right));
+  const bottomGroups = $derived(groupsIn(app.layout.dock.bottom));
+  const sideGroups = $derived([...leftGroups, ...centerGroups, ...rightGroups]);
 
-  // The conversation keeps at least 360px; a panel takes what is left, within its own limits.
-  const maxWidth = (panel: Panel) => () => {
-    const other = panel === "files" ? (showViewer ? app.layout.viewerWidth : 0) : app.filesVisible ? app.layout.filesWidth : 0;
-    return Math.max(panel === "files" ? 160 : 320, winW - 48 - 360 - other);
+  const minWidth = (g: Group) => Math.max(...g.panels.filter(visible).map((p) => MIN_WIDTH[p]));
+  // The session area keeps at least 360px; a group takes what is left, within its own limits.
+  const maxWidth = (g: Group) => () => {
+    const others = sideGroups.reduce((sum, x) => (x === g ? sum : sum + Math.max(minWidth(x), x.size)), 0);
+    return Math.max(minWidth(g), winW - 48 - 360 - others);
   };
-  const widthKey = (panel: Panel) => (panel === "files" ? "filesWidth" : "viewerWidth") as "filesWidth" | "viewerWidth";
+  const widthOf = (g: Group) => Math.max(minWidth(g), Math.min(g.size, maxWidth(g)()));
 
-  function resize(panel: Panel, v: number, done: boolean) {
-    app.layout[widthKey(panel)] = v;
+  function resize(g: Group, v: number, done: boolean) {
+    g.size = v;
     if (done) app.save();
   }
-
-  function toggleFiles() {
-    app.filesVisible = !app.filesVisible;
+  function resetSize(g: Group) {
+    g.size = DEFAULT_WIDTH[shownPanel(g, visible) ?? g.active];
     app.save();
   }
+
+  // A panel that opens comes to the front of its group: a file in the viewer, the terminal, the
+  // side bar, and the plan when a new plan arrives in the active session.
+  let lastViewer: unknown = null;
+  $effect(() => {
+    const v = app.viewer;
+    if (v && v !== lastViewer) untrack(() => dock.reveal("viewer"));
+    lastViewer = v;
+  });
+  let lastTerminal = false;
+  $effect(() => {
+    const on = app.terminalVisible;
+    if (on && !lastTerminal) untrack(() => dock.reveal("terminal"));
+    lastTerminal = on;
+  });
+  let lastSide = true;
+  $effect(() => {
+    const on = app.filesVisible;
+    if (on && !lastSide) untrack(() => dock.reveal("side"));
+    lastSide = on;
+  });
+  const planSeen = new Map<string, string | undefined>();
+  $effect(() => {
+    const s = app.session;
+    if (!s) return;
+    const id = s.entries.findLast((e) => e.t === "plan" || e.t === "panePlan")?.id;
+    const known = planSeen.has(s.key);
+    const before = planSeen.get(s.key);
+    planSeen.set(s.key, id);
+    if (known && id && id !== before && !s.replaying) untrack(() => dock.open("plan"));
+  });
 
   function inTerminal(el: Element | null) {
     return !!el?.closest(".xterm");
@@ -227,11 +257,13 @@
     else if (mod(e) && e.shiftKey && k === "f") app.overlay = "search";
     else if (mod(e) && k === "j") app.overlay = "queue";
     else if (mod(e) && k === "e") app.overlay = "sessions";
-    else if (mod(e) && k === "b") toggleFiles();
-    else if (mod(e) && e.key === "`") app.terminalVisible = !app.terminalVisible;
+    else if (mod(e) && k === "b") dock.toggle("side");
+    else if (mod(e) && e.key === "`") dock.toggle("terminal");
     else if (mod(e) && e.key === ".") app.stop();
     // Sessions: Ctrl+Tab and Ctrl+Shift+Tab cycle (Ctrl on every OS), Mod+1 to Mod+9 pick one.
     else if (e.ctrlKey && !e.altKey && e.key === "Tab") app.cycleSession(e.shiftKey ? -1 : 1);
+    // Ctrl+Shift+Page Up and Page Down move the active tab (Ctrl on every OS, like Ctrl+Tab).
+    else if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "PageUp" || e.key === "PageDown")) app.moveActiveSession(e.key === "PageUp" ? -1 : 1);
     else if (mod(e) && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key) && !inTerminal(target)) app.showSessionAt(Number(e.key) - 1);
     else if (mod(e) && e.key === "Enter" && !(target instanceof HTMLTextAreaElement)) {
       const plan = session?.waitingPlan;
@@ -267,57 +299,72 @@
       </div>
     </div>
   {:else}
-    {#snippet panel(p: Panel, edge: "left" | "right")}
-      {#if edge === "left"}
-        <Splitter edge="left" value={app.layout[widthKey(p)]} min={p === "files" ? 160 : 320} max={maxWidth(p)} onchange={(v, d) => resize(p, v, d)} onreset={() => resize(p, defaultLayout[widthKey(p)], true)} />
-      {/if}
-      <div class="panel" style="width: {Math.min(app.layout[widthKey(p)], maxWidth(p)())}px">
-        {#if p === "files"}
-          {#if app.settings.sessionTabs === "side"}<SidePanel {project} />{:else}<FileTree {project} />{/if}
-        {:else}<Viewer {project} />{/if}
+    <div class="work" data-dock-work>
+      {#each leftGroups as g (g.id)}
+        <div class="col" style="width: {widthOf(g)}px"><DockGroup zone="left" group={g} /></div>
+        <Splitter edge="right" value={g.size} min={minWidth(g)} max={maxWidth(g)} onchange={(v, d) => resize(g, v, d)} onreset={() => resetSize(g)} />
+      {/each}
+      <div class="mid">
+        <div class="top" data-dock-top>
+          <main class="center" data-dock-center>
+            <IdentityBar />
+            {#if session && session.mode === "pane"}
+              {#key session.key}<AgentPane {session} {project} />{/key}
+            {:else if session}
+              {#if session.status === "claudeAccess"}
+                <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><ClaudeAccess {session} /></div>
+              {:else if app.envProblem}
+                <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
+              {/if}
+              <Conversation bind:this={conversation} {session} />
+              <MessageBox bind:this={messageBox} {session} onfocuscard={() => conversation?.focusLastCard()} />
+            {:else}
+              {#if app.envProblem}
+                <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
+              {/if}
+              <div class="flex-1"></div>
+            {/if}
+          </main>
+          {#each centerGroups as g (g.id)}
+            <Splitter edge="left" value={g.size} min={minWidth(g)} max={maxWidth(g)} onchange={(v, d) => resize(g, v, d)} onreset={() => resetSize(g)} />
+            <div class="col" style="width: {widthOf(g)}px"><DockGroup zone="center" group={g} /></div>
+          {/each}
+        </div>
+        {#if bottomGroups.length}
+          <Splitter
+            edge="top"
+            value={app.layout.bottomHeight}
+            min={120}
+            max={() => window.innerHeight * 0.8}
+            onchange={(v, d) => {
+              app.layout.bottomHeight = v;
+              if (d) app.save();
+            }}
+            onreset={() => {
+              app.layout.bottomHeight = DEFAULT_BOTTOM;
+              app.save();
+            }}
+          />
+          <div class="bottom" style="height: {app.layout.bottomHeight}px">
+            {#each bottomGroups as g (g.id)}
+              <div class="cell"><DockGroup zone="bottom" group={g} /></div>
+            {/each}
+          </div>
+        {/if}
       </div>
-      {#if edge === "right"}
-        <Splitter edge="right" value={app.layout[widthKey(p)]} min={p === "files" ? 160 : 320} max={maxWidth(p)} onchange={(v, d) => resize(p, v, d)} onreset={() => resize(p, defaultLayout[widthKey(p)], true)} />
-      {/if}
-    {/snippet}
-    {#each leftPanels as p (p)}{@render panel(p, "right")}{/each}
-    <main class="center">
-      <IdentityBar />
-      {#if session && session.mode === "pane"}
-        {#key session.key}<AgentPane {session} {project} />{/key}
-      {:else if session}
-        {#if session.status === "claudeAccess"}
-          <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><ClaudeAccess {session} /></div>
-        {:else if app.envProblem}
-          <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
-        {/if}
-        <Conversation bind:this={conversation} {session} />
-        <MessageBox bind:this={messageBox} {session} onfocuscard={() => conversation?.focusLastCard()} />
-      {:else}
-        {#if app.envProblem}
-          <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
-        {/if}
-        <div class="flex-1"></div>
-      {/if}
-      {#if app.terminalVisible}
-        <Splitter
-          edge="top"
-          value={app.layout.terminalHeight}
-          min={120}
-          max={() => window.innerHeight * 0.8}
-          onchange={(v, d) => {
-            app.layout.terminalHeight = v;
-            if (d) app.save();
-          }}
-          onreset={() => {
-            app.layout.terminalHeight = defaultLayout.terminalHeight;
-            app.save();
-          }}
-        />
-        {#key project.id}<TerminalDrawer {project} />{/key}
-      {/if}
-    </main>
-    {#each rightPanels as p (p)}{@render panel(p, "left")}{/each}
+      {#each rightGroups as g (g.id)}
+        <Splitter edge="left" value={g.size} min={minWidth(g)} max={maxWidth(g)} onchange={(v, d) => resize(g, v, d)} onreset={() => resetSize(g)} />
+        <div class="col" style="width: {widthOf(g)}px"><DockGroup zone="right" group={g} /></div>
+      {/each}
+    </div>
+    <!-- Each panel renders once here and moves into its slot in a dock group (dockHost). -->
+    <div class="pool">
+      {#if visible("side")}<div class="host" {@attach dockHost("side")}><SidePanel {project} /></div>{/if}
+      {#if visible("viewer")}<div class="host" {@attach dockHost("viewer")}><Viewer {project} /></div>{/if}
+      {#if visible("plan")}<div class="host" {@attach dockHost("plan")}><PlanPanel /></div>{/if}
+      {#if visible("terminal")}<div class="host" {@attach dockHost("terminal")}>{#key project.id}<TerminalDrawer {project} />{/key}</div>{/if}
+    </div>
+    {#if dock.dragging}<DockOverlay />{/if}
   {/if}
 </div>
 
@@ -357,18 +404,58 @@
     height: 100%;
     background: var(--bg);
   }
+  .work {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+  }
+  .mid {
+    flex: 1;
+    min-width: 360px;
+    display: flex;
+    flex-direction: column;
+  }
+  .top {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
   .center {
+    flex: 1;
+    min-width: 360px;
+    display: flex;
+    flex-direction: column;
+  }
+  .col {
+    flex-shrink: 0;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .bottom {
+    flex-shrink: 0;
+    display: flex;
+    min-height: 0;
+  }
+  .cell {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
   }
-  .panel {
-    flex-shrink: 0;
+  .cell + .cell {
+    border-inline-start: 1px solid var(--border);
+  }
+  .pool {
+    display: none;
+  }
+  .host {
+    flex: 1;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    min-height: 0;
   }
   .toast {
     position: fixed;

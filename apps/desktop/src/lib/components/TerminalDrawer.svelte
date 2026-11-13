@@ -9,6 +9,8 @@
   import { keyLabel } from "../platform";
   import { app, type Project } from "../stores/app.svelte";
   import { decode, newTerminal } from "../xterm";
+  import { dock } from "../stores/dock.svelte";
+  import DockGrip from "./DockGrip.svelte";
 
   // The shell drawer. "Run in terminal" (install commands) types into this shell only, never
   // into an agent pane (see AgentPane and stores/paneterm).
@@ -97,12 +99,14 @@
 
 </script>
 
-<section class="drawer" style="height: {app.layout.terminalHeight}px">
-  <header class="head">
+<section class="drawer" aria-label={t("term.title")}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <header class="head" onpointerdown={(e) => dock.fromHeader("terminal", e)}>
     <span class="font-medium">{t("term.title")}</span>
     <span class="kbd">{keyLabel("Mod+`")}</span>
     <span class="flex-1"></span>
-    <button class="icon-btn" onclick={() => (app.terminalVisible = false)} aria-label={t("common.close")} title={t("common.close")}>
+    <DockGrip panel="terminal" />
+    <button class="icon-btn" onclick={() => dock.close("terminal")} aria-label={t("common.close")} title={t("common.close")}>
       <X size={13} />
     </button>
   </header>
@@ -112,7 +116,9 @@
 <style>
   .drawer {
     position: relative;
-    flex-shrink: 0;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     background: var(--bg-sunken);

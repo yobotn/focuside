@@ -1,7 +1,37 @@
 <script lang="ts">
-  import { Plus, Gear } from "phosphor-svelte";
+  // Projects on top. Below them, after a line, the side bar views (Files and Sessions): click
+  // one to show it, click the one that is shown to hide the side bar. Settings at the bottom.
+  import { Files, Gear, Plus, Stack } from "phosphor-svelte";
   import { t } from "../i18n";
+  import { keyLabel } from "../platform";
   import { app } from "../stores/app.svelte";
+  import { dock } from "../stores/dock.svelte";
+
+  type View = "files" | "sessions";
+  const views: { id: View; label: string }[] = $derived([
+    { id: "files", label: t("files.title") },
+    { id: "sessions", label: t("session.list") },
+  ]);
+  const shownView = $derived(dock.shown("side") ? app.layout.sideView : null);
+  const waiting = $derived(!!app.active && app.projectWaiting(app.active));
+
+  function pick(v: View) {
+    if (shownView === v) {
+      dock.close("side");
+      return;
+    }
+    app.layout.sideView = v;
+    dock.open("side");
+    app.save();
+  }
+
+  function onkey(e: KeyboardEvent, i: number) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const list = (e.currentTarget as HTMLElement).parentElement;
+    const next = (i + (e.key === "ArrowDown" ? 1 : -1) + views.length) % views.length;
+    list?.querySelectorAll<HTMLElement>("button")[next]?.focus();
+  }
 
   function color(hue: number) {
     return `hsl(${hue} var(--project-s) var(--project-l))`;
@@ -28,6 +58,27 @@
     <Plus size={16} />
   </button>
   <span class="flex-1"></span>
+  {#if app.active}
+    <div class="views" role="tablist" aria-orientation="vertical" aria-label={t("side.views")}>
+      {#each views as v, i (v.id)}
+        <button
+          class="view"
+          class:active={shownView === v.id}
+          role="tab"
+          aria-selected={shownView === v.id}
+          aria-label={v.label}
+          title={shownView === v.id ? t("side.hide", { view: v.label, key: keyLabel("Mod+B") }) : v.label}
+          onclick={() => pick(v.id)}
+          onkeydown={(e) => onkey(e, i)}
+        >
+          {#if v.id === "files"}<Files size={18} />{:else}<Stack size={18} />{/if}
+          {#if v.id === "sessions" && waiting && shownView !== "sessions"}
+            <span class="dot small pulse-warn" aria-hidden="true"></span>
+          {/if}
+        </button>
+      {/each}
+    </div>
+  {/if}
   <button class="add" title={t("cmd.settings")} aria-label={t("cmd.settings")} onclick={() => (app.overlay = "settings")}>
     <Gear size={16} />
   </button>
@@ -85,6 +136,51 @@
     border-radius: 50%;
     background: var(--warn-line);
     border: 2px solid var(--bg-sunken);
+  }
+  .views {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .view {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--fg-faint);
+  }
+  .view:hover {
+    background: var(--bg-hover);
+    color: var(--fg);
+  }
+  .view.active {
+    color: var(--fg);
+    background: var(--bg-active);
+  }
+  .view.active::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: -8px;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--fg-muted);
+  }
+  .dot.small {
+    top: 3px;
+    inset-inline-end: 3px;
+    width: 8px;
+    height: 8px;
   }
   .add {
     display: grid;

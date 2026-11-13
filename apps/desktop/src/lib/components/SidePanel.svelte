@@ -1,35 +1,26 @@
 <script lang="ts">
-  // The side panel with Session tabs: Side. Two views, Files and Sessions, picked in the header.
-  // Sessions lists the project's open sessions with the same tabs as the identity bar strip.
-  import { ArrowsLeftRight, CaretDown, Plus } from "phosphor-svelte";
+  // The side bar: the file tree or the project's open sessions. The view is picked with the
+  // Files and Sessions icons on the rail. Sessions shows the same tabs as the identity bar
+  // strip; drag a tab to change the order. Drag the header to move the side bar (DockGrip).
+  import { CaretDown, Plus } from "phosphor-svelte";
   import { t } from "../i18n";
   import { keyLabel } from "../platform";
+  import { reorder } from "../reorder";
   import { app, type Project } from "../stores/app.svelte";
+  import { dock } from "../stores/dock.svelte";
+  import DockGrip from "./DockGrip.svelte";
   import FileTree from "./FileTree.svelte";
   import SessionTab from "./SessionTab.svelte";
 
   let { project }: { project: Project } = $props();
 
   const view = $derived(app.layout.sideView);
-  const waiting = $derived(project.sessions.some((s) => s.waiting));
-
-  function setView(v: "files" | "sessions") {
-    app.layout.sideView = v;
-    app.save();
-  }
 </script>
 
-<aside class="side">
-  <div class="head">
-    <div class="seg" role="tablist">
-      <button role="tab" aria-selected={view === "files"} class:on={view === "files"} onclick={() => setView("files")}>
-        {t("files.title")}
-      </button>
-      <button role="tab" aria-selected={view === "sessions"} class:on={view === "sessions"} onclick={() => setView("sessions")}>
-        {t("session.list")}
-        {#if waiting && view !== "sessions"}<span class="dot pulse-warn" aria-hidden="true"></span>{/if}
-      </button>
-    </div>
+<aside class="side" aria-label={view === "files" ? t("files.title") : t("session.list")}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="head" onpointerdown={(e) => dock.fromHeader("side", e)}>
+    <span class="title">{view === "files" ? t("files.title") : t("session.list")}</span>
     <span class="flex-1"></span>
     {#if view === "sessions"}
       <button class="icon-btn" title={t("session.new")} aria-label={t("session.new")} onclick={() => app.newSession()}>
@@ -39,20 +30,13 @@
         <CaretDown size={11} />
       </button>
     {/if}
-    <button
-      class="icon-btn move"
-      onclick={() => app.movePanel("files")}
-      title={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
-      aria-label={app.layout.filesSide === "left" ? t("layout.moveRight") : t("layout.moveLeft")}
-    >
-      <ArrowsLeftRight size={12} />
-    </button>
+    <DockGrip panel="side" />
   </div>
   <div class="body">
     {#if view === "files"}
-      <FileTree {project} head={false} />
+      <FileTree {project} />
     {:else}
-      <div class="list" role="tablist" aria-orientation="vertical" aria-label={t("session.list")}>
+      <div class="list" role="tablist" aria-orientation="vertical" aria-label={t("session.list")} {@attach reorder("y", (key, i) => app.moveSession(key, i))}>
         {#each project.sessions as x (x.key)}
           <SessionTab session={x} active={x.key === project.activeKey} closable={project.sessions.length > 1} vertical />
         {/each}
@@ -79,52 +63,16 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 0 6px 0 8px;
+    padding: 0 4px 0 12px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
-  .seg {
-    display: inline-flex;
-    padding: 2px;
-    gap: 2px;
-    border-radius: 6px;
-    background: var(--bg-sunken);
-  }
-  .seg button {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 22px;
-    padding: 0 8px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--fg-muted);
+  .title {
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-  }
-  .seg button:hover {
-    color: var(--fg);
-  }
-  .seg button.on {
-    background: var(--bg);
-    color: var(--fg);
-    box-shadow: 0 0 0 1px var(--border);
-  }
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--warn-line);
-  }
-  .move {
-    opacity: 0;
-  }
-  .side:hover .move,
-  .move:focus-visible {
-    opacity: 1;
+    color: var(--fg-muted);
   }
   .body {
     flex: 1;

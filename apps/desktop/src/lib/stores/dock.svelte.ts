@@ -1,0 +1,206 @@
+// Panel docking in the UI: which panels are visible, moving them, and the drag that does it.
+// Dragging uses pointer events, not HTML drag and drop: with the window's file drop turned on
+// (Tauri dragDropEnabled), WebView2 does not deliver HTML drag events to the page.
+import type { Attachment } from "svelte/attachments";
+import { untrack } from "svelte";
+import { findPanel, isNoop, movePanel, shownPanel, type DropTarget, type PanelId, type Zone } from "../dock";
+import { app } from "./app.svelte";
+
+/** A place the dragged panel can land, in window pixels. */
+export interface DropZone {
+  key: string;
+  target: DropTarget;
+  rect: { left: number; top: number; width: number; height: number };
+  /** Edge zones show a label; groups do not. */
+  edge: boolean;
+}
+
+const THRESHOLD = 5;
+
+class DockStore {
+  /** The panel being dragged, once the pointer moved past the threshold. */
+  dragging = $state<PanelId | null>(null);
+  pointer = $state({ x: 0, y: 0 });
+  zones = $state<DropZone[]>([]);
+  over = $state<DropZone | null>(null);
+  /** Where each visible panel is drawn. Panels render once and move into their slot. */
+  slots = $state<Partial<Record<PanelId, HTMLElement>>>({});
+
+  visible(p: PanelId): boolean {
+    const project = app.active;
+    if (!project) return false;
+    if (p === "side") return app.filesVisible;
+    if (p === "viewer") return !!app.viewer && app.viewer.projectId === project.id;
+    if (p === "plan") return app.planVisible;
+    return app.terminalVisible;
+  }
+
+  /** True when the panel is visible and is the tab its group shows. */
+  shown(p: PanelId): boolean {
+    const at = findPanel(app.layout.dock, p);
+    return !!at && shownPanel(at.group, (x) => this.visible(x)) === p;
+  }
+
+  /** Shows a panel and makes it the active tab of its group. */
+  open(p: PanelId) {
+    if (p === "side") app.filesVisible = true;
+    else if (p === "plan") app.planVisible = true;
+    else if (p === "terminal") app.terminalVisible = true;
+    this.reveal(p);
+  }
+
+  /** Hides a panel. The viewer closes its file. */
+  close(p: PanelId) {
+    if (p === "side") app.filesVisible = false;
+    else if (p === "plan") app.planVisible = false;
+    else if (p === "terminal") app.terminalVisible = false;
+    else app.viewer = null;
+    app.save();
+  }
+
+  /** Mod+B, Mod+` and the palette: a panel behind another tab comes to the front, else it toggles. */
+  toggle(p: PanelId) {
+    if (this.visible(p) && !this.shown(p)) this.reveal(p);
+    else if (this.visible(p)) this.close(p);
+    else this.open(p);
+    app.save();
+  }
+
+  /** Makes the panel the active tab of its group. */
+  reveal(p: PanelId) {
+    const at = findPanel(app.layout.dock, p);
+    if (at && at.group.active !== p) {
+      at.group.active = p;
+      app.save();
+    }
+  }
+
+  zoneOf(p: PanelId): Zone | null {
+    return findPanel(app.layout.dock, p)?.zone ?? null;
+  }
+
+  move(p: PanelId, to: DropTarget) {
+    if (isNoop(app.layout.dock, p, to)) return;
+    app.layout.dock = movePanel(app.layout.dock, p, to);
+    app.save();
+  }
+
+  /** Pointer down on a header or tab. A drag starts once the pointer moves a few pixels. */
+  start(p: PanelId, e: PointerEvent) {
+    if (e.button !== 0) return;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const move = (ev: PointerEvent) => {
+      if (!this.dragging) {
+        if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < THRESHOLD) return;
+        this.begin(p);
+      }
+      this.pointer = { x: ev.clientX, y: ev.clientY };
+      this.over = this.hit(ev.clientX, ev.clientY);
+      ev.preventDefault();
+    };
+    const end = (drop: boolean) => {
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", cancel, true);
+      window.removeEventListener("keydown", key, true);
+      if (!this.dragging) return;
+      const over = this.over;
+      this.dragging = null;
+      this.over = null;
+      this.zones = [];
+      document.body.classList.remove("docking");
+      // The click that ends a drag must not also press the button under the pointer.
+      const swallow = (ev: Event) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+      if (drop && over) this.move(p, over.target);
+    };
+    const up = () => end(true);
+    const cancel = () => end(false);
+    const key = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape" || !this.dragging) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      end(false);
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", cancel, true);
+    window.addEventListener("keydown", key, true);
+  }
+
+  /** Pointer down on a panel header: drags unless it started on a control in the header. */
+  fromHeader(p: PanelId, e: PointerEvent) {
+    const el = e.target as Element | null;
+    if (el?.closest("button, input, select, textarea, a, [contenteditable]")) return;
+    this.start(p, e);
+  }
+
+  private begin(p: PanelId) {
+    this.dragging = p;
+    this.zones = this.measure(p);
+    document.body.classList.add("docking");
+  }
+
+  /** The drop zones, from the work area and the groups on screen. */
+  private measure(p: PanelId): DropZone[] {
+    const work = document.querySelector<HTMLElement>("[data-dock-work]")?.getBoundingClientRect();
+    const center = document.querySelector<HTMLElement>("[data-dock-center]")?.getBoundingClientRect();
+    const top = document.querySelector<HTMLElement>("[data-dock-top]")?.getBoundingClientRect();
+    if (!work || !center || !top) return [];
+    const d = app.layout.dock;
+    const out: DropZone[] = [];
+    const edge = 64;
+    const add = (key: string, target: DropTarget, r: DropZone["rect"], isEdge: boolean) => {
+      if (!isNoop(d, p, target)) out.push({ key, target, rect: r, edge: isEdge });
+    };
+    // Edge zones first: they win where they overlap a group.
+    add("left", { kind: "zone", zone: "left" }, { left: work.left, top: work.top, width: edge, height: work.height }, true);
+    add("right", { kind: "zone", zone: "right" }, { left: work.right - edge, top: work.top, width: edge, height: work.height }, true);
+    add("bottom", { kind: "zone", zone: "bottom" }, { left: top.left, top: top.bottom - edge, width: top.width, height: edge }, true);
+    // The session area: a new group in the editor area, next to it.
+    add("center", { kind: "zone", zone: "center" }, { left: center.left, top: center.top, width: center.width, height: center.height }, false);
+    for (const el of document.querySelectorAll<HTMLElement>("[data-dock-group]")) {
+      const id = el.dataset.dockGroup!;
+      const zone = el.dataset.dockZone as Zone;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      add(`group-${id}`, { kind: "group", zone, id }, { left: r.left, top: r.top, width: r.width, height: r.height }, false);
+    }
+    return out;
+  }
+
+  private hit(x: number, y: number): DropZone | null {
+    for (const z of this.zones) {
+      const r = z.rect;
+      if (x >= r.left && x < r.left + r.width && y >= r.top && y < r.top + r.height) return z;
+    }
+    return null;
+  }
+}
+
+export const dock = new DockStore();
+
+/** Marks the element where a panel is drawn. */
+export function dockSlot(p: PanelId): Attachment<HTMLElement> {
+  return (node) => {
+    dock.slots[p] = node;
+    return () => {
+      untrack(() => {
+        if (dock.slots[p] === node) delete dock.slots[p];
+      });
+    };
+  };
+}
+
+/** Moves a panel's element into its slot, and again whenever the slot changes. */
+export function dockHost(p: PanelId): Attachment<HTMLElement> {
+  return (node) => {
+    const slot = dock.slots[p];
+    if (slot && node.parentElement !== slot) slot.appendChild(node);
+  };
+}

@@ -218,12 +218,13 @@ Gap we fill: one calm app built around reading and approving agent work, with a 
 +--+------------+--------------------------------+-----------------------+
 ```
 
-- **Rail** (far left): one colored monogram per open project (KR = keeprun, RS = rigsweep). Click to switch project. Amber dot when a session there waits for you. "+" opens a folder.
-- **Identity bar** (top): project, branch, session tabs (or the session name when Session tabs is Side), agent and model (click to change model), context usage when the adapter reports it, waiting count.
+- **Rail** (far left): one colored monogram per open project (KR = keeprun, RS = rigsweep). Click to switch project. Amber dot when a session there waits for you. "+" opens a folder. Below the projects, after a line: the side bar views, Files and Sessions (click the shown one to hide the side bar), then Settings.
+- **Identity bar** (top): project, branch, session tabs (or the session name when "Session tabs in the top bar" is off), agent and model (click to change model), context usage when the adapter reports it, waiting count.
 - **Window title:** `project - session name - FocusIDE`, plus the total waiting count, so the taskbar, Dock and Alt+Tab show it.
-- **Files** (left): open by default, Mod+B hides it. CLAUDE.md pinned at the top when it exists.
+- **Side bar** (left): Files or Sessions, open by default, Mod+B hides it. CLAUDE.md pinned at the top of Files when it exists.
+- **Panels move:** the side bar, viewer, plan and terminal dock left, right, bottom or in the center next to the conversation, alone or as tabs. See "Panel docking (2026-11-13)" in section 10.
 - **Conversation** (center): max 760px wide, reads like a document. Tool calls show as one line ("Read src/main.rs"). Long conversations use a virtualized list.
-- **Viewer** (right): opens only when a file or diff is opened. Code in CodeMirror, markdown rendered, toggle to source. If the agent changes a file with unsaved edits: "Changed on disk. Reload / Keep mine".
+- **Viewer** (center, next to the conversation, with the Plan as a second tab): opens only when a file or diff is opened. Code in CodeMirror, markdown rendered, toggle to source. If the agent changes a file with unsaved edits: "Changed on disk. Reload / Keep mine".
 - **Terminal:** bottom drawer, one terminal in v1, hidden until opened (Mod+`).
 
 ### Message box
@@ -303,6 +304,7 @@ Mod is Ctrl on Windows and Linux, Cmd on macOS.
 | Sessions | Mod+E |
 | Next or previous session tab | Ctrl+Tab, Ctrl+Shift+Tab (Ctrl on every OS; also from a terminal or pane) |
 | Session tab 1 to 9 | Mod+1 to Mod+9 |
+| Move the active session tab | Ctrl+Shift+Page Up, Ctrl+Shift+Page Down (Ctrl on every OS; also from a terminal or pane) |
 | Files | Mod+B |
 | Terminal | Mod+` |
 
@@ -723,6 +725,31 @@ The viewer shows images (png, jpg, jpeg, gif, webp, bmp, ico, avif, svg) and PDF
 Bundle size: the PDF.js main chunk is 499 KB (152 KB gzip), the worker 1.3 MB, the data files 2.9 MB (CMaps 1.2 MB, fonts 0.8 MB, decoders 0.9 MB). About 4.7 MB in `dist`, about 2.3 MB compressed. None of it loads until a PDF opens. The PDF.js license (Apache 2.0) and the font and decoder license files ship next to the data.
 
 Checked in Chrome (same engine as WebView2) with the app CSP: PDF pages render with a standard font, page buttons and zoom work, PNG and SVG show with the checkerboard, + and Ctrl+wheel zoom, and an SVG `<script>` and `onload` handler did not run. Not checked: WKWebView and WebKitGTK, the diff view in the running app.
+
+### Panel docking (2026-11-13)
+
+The owner asked for a free way to move panels instead of the "move to the other side" arrows, icon tabs for the side bar, a Plan panel in the center, and drag to reorder session tabs.
+
+| Decision | Why |
+|---|---|
+| Four dock zones. Left and right run the full height. Center groups sit next to the conversation (the editor area). Bottom runs under the conversation and the center groups. A zone holds groups side by side; a group holds one or more panels as tabs. The session area (conversation or agent pane) always stays in the center and cannot be moved | Same model as VS Code and Cursor, kept small: no nested splits |
+| Panels: Side bar (Files or Sessions), Viewer, Plan, Terminal. Default: side bar left, Viewer and Plan as tabs in one center group (Viewer is the active tab), terminal at the bottom | Owner: the plan opens next to the file viewer, like an editor tab |
+| Drag a panel by its header, its tab or the grip (six dots) and drop it on: the left or right edge (a new group at the outer edge), the bottom strip of the center (a new bottom group), the conversation (a new center group next to it), or a group (a tab in it). While dragging, every zone has a dashed outline, the zone under the pointer is filled, a box shows where the panel lands, and the panel name follows the pointer. Esc cancels | Owner request |
+| Keyboard: the grip opens a menu "Move to" with Left, Center, Right, Bottom (the current place is checked) and "Reset panel layout". Arrow keys, Home, End and Esc work in the menu. Tabs in a group use Left and Right arrows. "Reset panel layout" stays in the palette; "Show or hide plan" is new there. The two "Move ... to the other side" commands and the arrow buttons are gone | Accessible alternative to dragging |
+| Groups resize with the existing Splitter (arrow keys, Shift for bigger steps, Home and double-click reset to the default width). The bottom zone has one height. The conversation keeps at least 360 px: a group is never wider than the window minus the rail, 360 px and the other groups | Section 5 rule |
+| A tab strip shows when a group has two or more visible panels, or for the Plan alone (it has no header of its own). A group shows only while one of its panels is visible: side bar (Mod+B or the rail icons), viewer (a file is open), plan (a plan arrives, or the palette), terminal (Mod+`). Opening a panel brings it to the front of its group; Mod+B and Mod+` bring a panel behind another tab to the front before they hide it | No empty groups on screen |
+| The Plan panel opens and becomes the active tab when a new plan entry arrives in the active session (not during a resume replay). Its visibility is not saved between runs | Plans are per turn |
+| Panels render once in a hidden pool and their element moves into the slot of their group (Svelte attachments `dockHost` and `dockSlot`). Moving a panel or switching tabs does not remount it: the terminal keeps its shell, the viewer keeps unsaved edits | Remounting the terminal would end the shell |
+| Saved in `layout.dock` (zones, groups, tabs, active tab, widths) and `layout.bottomHeight` in the existing state file. A layout saved before docking (`filesSide`, `viewerSide`, `filesWidth`, `viewerWidth`, `terminalHeight`) is converted: files keep their side, a right viewer goes to the center group with the Plan, a left viewer goes left. Unknown panels are dropped and missing ones go back to their default group | No lost layout on update |
+| Custom code (`lib/dock.ts` for the pure layout functions, `lib/stores/dock.svelte.ts` for visibility and the drag, `DockGroup`, `DockGrip`, `DockOverlay`), about 33 KB of source with styles and comments, no new dependency. Checked dockview-core 8.9.0 (MIT, no dependencies): 403 KB minified without styles, 94 KB gzip. It uses HTML drag and drop, and with the window's file drop on (`dragDropEnabled`, needed to open folders by dropping them), WebView2 does not deliver HTML drag events to the page. All dragging here uses pointer events | Smaller, works in WebView2 with file drop on, and fits Svelte 5 without wrapping each panel in a mounted component |
+| Side bar icon tabs sit on the project rail, below the projects after a hairline, above Settings: Files and Sessions. Click the other icon to switch views, click the shown one to hide the side bar. The Sessions icon has an amber dot when a session in the project waits and Sessions is not shown. This replaces the Files / Sessions switch in the side bar header; the header now shows the view name, the session buttons and the grip | One rail, not two. A bar on top of the side bar would vanish with the side bar, so there would be nothing to click to open it again |
+| The Sessions view is always available. The setting is now "Session tabs in the top bar: On / Off" (stored values `top` and `side` are unchanged) | Owner request |
+| Session tabs reorder by drag in the top strip and in the Sessions list. A 2 px accent line shows where the tab lands; the dragged tab is dimmed; Esc cancels. Ctrl+Shift+Page Up and Page Down move the active tab one place (Ctrl on every OS, like Ctrl+Tab). Mod+1 to Mod+9 follow the new order. xterm.js skips these two keys so they also work from the terminal and agent panes. No conflict found: CodeMirror and the app had no binding for them, and Shift+Page Up alone still scrolls the terminal | Owner request |
+| The order is kept in the project's session list and in the saved session list: open sessions take each other's places there in tab order, other saved sessions keep their places | Saved sessions are also the "Earlier sessions" history |
+
+Verified: `npm run lint`, `npm test`. In Edge headless (same engine as WebView2) with the Vite dev server and a mocked Tauri API (not committed): the default layout, a file opening in the center group, dragging the viewer to the left edge (overlay, preview and labels drawn), dragging the terminal onto the side bar as a tab, "Move to: Right" from the grip menu with the keyboard focus, the Plan panel opening in the center from the palette, the rail icons switching and hiding the side bar, drag reorder in the top strip and the Sessions list with the insertion line, Ctrl+Shift+Page Up, and the terminal moving without a second `pty_open`.
+
+Not verified: the Tauri window itself, macOS and Linux, the real Plan panel (a placeholder `PlanPanel.svelte` stands in until it lands), and touch input.
 
 ## 11. Open items
 
