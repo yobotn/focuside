@@ -6,6 +6,8 @@
   import { updates } from "../updates.svelte";
   import { reorder } from "../reorder";
   import SessionTab from "./SessionTab.svelte";
+  import DockGrip from "./DockGrip.svelte";
+  import { dock } from "../stores/dock.svelte";
 
   function restart() {
     if (app.projects.some((pr) => pr.sessions.some((x) => x.running || x.paneAlive))) {
@@ -62,7 +64,16 @@
 </script>
 
 {#if p}
-  <header class="bar" class:narrow={width < 640} bind:clientWidth={width}>
+  <!-- The header of the Session panel: drag it (not the session tabs) or the grip to move the panel. -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <header
+    class="bar"
+    class:narrow={width < 640}
+    bind:clientWidth={width}
+    onpointerdown={(e) => {
+      if (!(e.target as Element).closest("[role=tablist]")) dock.fromHeader("session", e);
+    }}
+  >
     <span class="project" style="color: hsl({p.hue} var(--project-s) var(--project-l))">{p.name}</span>
     {#if p.branch}
       <span class="item"><GitBranch size={13} />{p.branch}</span>
@@ -127,6 +138,7 @@
         <span class="kbd">{keyLabel("Mod+J")}</span>
       </button>
     {/if}
+    <DockGrip panel="session" />
   </header>
 {/if}
 

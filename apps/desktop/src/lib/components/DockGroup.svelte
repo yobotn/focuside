@@ -3,7 +3,7 @@
   // once in App and move into their slot (dockHost), so moving a group or a tab does not restart
   // the terminal or reload the viewer. The tab strip shows with two or more visible panels, or
   // for a panel without its own header (the plan).
-  import { ListChecks, X } from "phosphor-svelte";
+  import { ChatText, ListChecks, X } from "phosphor-svelte";
   import { t } from "../i18n";
   import { shownPanel, type DockGroup, type PanelId, type Zone } from "../dock";
   import { dock, dockSlot } from "../stores/dock.svelte";
@@ -13,7 +13,7 @@
 
   let { zone, group }: { zone: Zone; group: DockGroup } = $props();
 
-  const OWN_HEADER = new Set<PanelId>(["side", "viewer", "terminal"]);
+  const OWN_HEADER = new Set<PanelId>(["session", "side", "viewer", "terminal"]);
 
   const visible = $derived(group.panels.filter((p) => dock.visible(p)));
   const shown = $derived(shownPanel(group, (p) => dock.visible(p)));
@@ -40,7 +40,7 @@
     <div class="strip">
       <div class="tabs" role="tablist" aria-label={t("dock.panels")}>
         {#each visible as p, i (p)}
-          <div class="tab" class:on={p === shown}>
+          <div class="tab" class:on={p === shown} class:fixed={p === "session"}>
             <button
               role="tab"
               data-tab={p}
@@ -51,12 +51,14 @@
               onclick={() => pick(p)}
               onkeydown={(e) => ontabkey(e, i)}
             >
-              {#if p === "plan"}<ListChecks size={13} />{/if}
+              {#if p === "plan"}<ListChecks size={13} />{:else if p === "prompts"}<ChatText size={13} />{/if}
               {panelName(p)}
             </button>
-            <button class="close" title={t("common.close")} aria-label={t("dock.close", { panel: panelName(p) })} onclick={() => dock.close(p)}>
-              <X size={11} />
-            </button>
+            {#if p !== "session"}
+              <button class="close" title={t("common.close")} aria-label={t("dock.close", { panel: panelName(p) })} onclick={() => dock.close(p)}>
+                <X size={11} />
+              </button>
+            {/if}
           </div>
         {/each}
       </div>
@@ -120,6 +122,9 @@
     gap: 5px;
     height: 100%;
     padding: 0 22px 0 8px;
+  }
+  .tab.fixed button[role="tab"] {
+    padding-inline-end: 8px;
     border: 0;
     background: transparent;
     color: inherit;

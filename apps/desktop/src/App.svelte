@@ -28,7 +28,8 @@
   import DockOverlay from "./lib/components/DockOverlay.svelte";
   import { reportIssue, updates } from "./lib/updates.svelte";
   import { dock, dockHost } from "./lib/stores/dock.svelte";
-  import { DEFAULT_BOTTOM, DEFAULT_WIDTH, MIN_WIDTH, shownPanel, type DockGroup as Group, type PanelId } from "./lib/dock";
+  import PromptsPanel from "./lib/components/PromptsPanel.svelte";
+  import { DEFAULT_BOTTOM, DEFAULT_WIDTH, MIN_WIDTH, fillGroup, shownPanel, type DockGroup as Group, type PanelId } from "./lib/dock";
 
   let conversation: Conversation | undefined = $state();
   let messageBox: MessageBox | undefined = $state();
@@ -136,7 +137,9 @@
       { id: "search", label: t("cmd.search"), hint: keyLabel("Mod+Shift+F"), run: () => (app.overlay = "search") },
       { id: "files", label: t("cmd.files"), hint: keyLabel("Mod+B"), run: () => dock.toggle("side") },
       { id: "term", label: t("cmd.terminal"), hint: keyLabel("Mod+`"), run: () => dock.toggle("terminal") },
-      { id: "planPanel", label: t("cmd.planPanel"), run: () => dock.toggle("plan") },
+      { id: "planPanel", label: t("cmd.planPanel"), run: () => dock.show("plan") },
+      { id: "promptsPanel", label: t("cmd.promptsPanel"), run: () => dock.show("prompts") },
+      { id: "sessionPanel", label: t("cmd.sessionPanel"), run: () => dock.show("session") },
       { id: "plan", label: t("cmd.planFirst"), run: () => app.setPlanFirst(!app.planFirst) },
       { id: "resetLayout", label: t("cmd.resetLayout"), run: () => app.resetLayout() },
       {
@@ -193,15 +196,28 @@
   const centerGroups = $derived(groupsIn(app.layout.dock.center));
   const rightGroups = $derived(groupsIn(app.layout.dock.right));
   const bottomGroups = $derived(groupsIn(app.layout.dock.bottom));
-  const sideGroups = $derived([...leftGroups, ...centerGroups, ...rightGroups]);
+  // One center group fills the middle: the one with the Session panel, else the first. The
+  // other groups have a width. Center groups before the fill group have their splitter on the
+  // right, the ones after it on the left.
+  const fill = $derived(fillGroup(centerGroups));
+  const fillAt = $derived(fill ? centerGroups.indexOf(fill) : -1);
+  const sideGroups = $derived([...leftGroups, ...centerGroups.filter((g) => g !== fill), ...rightGroups]);
 
   const minWidth = (g: Group) => Math.max(...g.panels.filter(visible).map((p) => MIN_WIDTH[p]));
-  // The session area keeps at least 360px; a group takes what is left, within its own limits.
+  // The middle keeps the minimum width of the fill group (360px with the Session panel), and
+  // 360px when the Session panel is at the bottom. A group takes what is left, within its own limits.
+  const midMin = $derived(Math.max(fill ? minWidth(fill) : 160, bottomGroups.some((g) => g.panels.includes("session")) ? MIN_WIDTH.session : 0));
   const maxWidth = (g: Group) => () => {
     const others = sideGroups.reduce((sum, x) => (x === g ? sum : sum + Math.max(minWidth(x), x.size)), 0);
-    return Math.max(minWidth(g), winW - 48 - 360 - others);
+    return Math.max(minWidth(g), winW - 48 - midMin - others);
   };
-  const widthOf = (g: Group) => Math.max(minWidth(g), Math.min(g.size, maxWidth(g)()));
+  // When the groups do not fit, each one gives up width in proportion to its size, down to its minimum.
+  const wanted = $derived(sideGroups.reduce((sum, x) => sum + Math.max(minWidth(x), x.size), 0));
+  const room = $derived(winW - 48 - midMin);
+  const widthOf = (g: Group) => {
+    const want = Math.max(minWidth(g), g.size);
+    return wanted <= room ? want : Math.max(minWidth(g), Math.floor((want * room) / wanted));
+  };
 
   function resize(g: Group, v: number, done: boolean) {
     g.size = v;
@@ -304,30 +320,20 @@
         <div class="col" style="width: {widthOf(g)}px"><DockGroup zone="left" group={g} /></div>
         <Splitter edge="right" value={g.size} min={minWidth(g)} max={maxWidth(g)} onchange={(v, d) => resize(g, v, d)} onreset={() => resetSize(g)} />
       {/each}
-      <div class="mid">
+      <div class="mid" style="min-width: {midMin}px">
         <div class="top" data-dock-top>
-          <main class="center" data-dock-center>
-            <IdentityBar />
-            {#if session && session.mode === "pane"}
-              {#key session.key}<AgentPane {session} {project} />{/key}
-            {:else if session}
-              {#if session.status === "claudeAccess"}
-                <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><ClaudeAccess {session} /></div>
-              {:else if app.envProblem}
-                <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
-              {/if}
-              <Conversation bind:this={conversation} {session} />
-              <MessageBox bind:this={messageBox} {session} onfocuscard={() => conversation?.focusLastCard()} />
+          {#each centerGroups as g, i (g.id)}
+            {#if g === fill}
+              <div class="fill" data-dock-fill={g.id} style="min-width: {minWidth(g)}px"><DockGroup zone="center" group={g} /></div>
+            {:else if i < fillAt}
+              <div class="col" style="width: {widthOf(g)}px"><DockGroup zone="center" group={g} /></div>
+              <Splitter edge="right" value={g.size} min={minWidth(g)} max={maxWidth(g)} onchange={(v, d) => resize(g, v, d)} onreset={() => resetSize(g)} />
             {:else}
-              {#if app.envProblem}
-                <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
-              {/if}
-              <div class="flex-1"></div>
+              <Splitter edge="left" value={g.size} min={minWidth(g)} max={maxWidth(g)} onchange={(v, d) => resize(g, v, d)} onreset={() => resetSize(g)} />
+              <div class="col" style="width: {widthOf(g)}px"><DockGroup zone="center" group={g} /></div>
             {/if}
-          </main>
-          {#each centerGroups as g (g.id)}
-            <Splitter edge="left" value={g.size} min={minWidth(g)} max={maxWidth(g)} onchange={(v, d) => resize(g, v, d)} onreset={() => resetSize(g)} />
-            <div class="col" style="width: {widthOf(g)}px"><DockGroup zone="center" group={g} /></div>
+          {:else}
+            <div class="fill empty" data-dock-fill=""><p>{t("dock.emptyCenter")}</p></div>
           {/each}
         </div>
         {#if bottomGroups.length}
@@ -347,7 +353,7 @@
           />
           <div class="bottom" style="height: {app.layout.bottomHeight}px">
             {#each bottomGroups as g (g.id)}
-              <div class="cell"><DockGroup zone="bottom" group={g} /></div>
+              <div class="cell" style="min-width: {g.panels.includes('session') ? MIN_WIDTH.session : 0}px"><DockGroup zone="bottom" group={g} /></div>
             {/each}
           </div>
         {/if}
@@ -359,9 +365,31 @@
     </div>
     <!-- Each panel renders once here and moves into its slot in a dock group (dockHost). -->
     <div class="pool">
+      <!-- The Session panel: the agent pane or the conversation of the active session. Moving it
+           moves this element, so the pane's terminal and its screen stay as they are. -->
+      <main class="host session" {@attach dockHost("session")}>
+        <IdentityBar />
+        {#if session && session.mode === "pane"}
+          {#key session.key}<AgentPane {session} {project} />{/key}
+        {:else if session}
+          {#if session.status === "claudeAccess"}
+            <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><ClaudeAccess {session} /></div>
+          {:else if app.envProblem}
+            <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
+          {/if}
+          <Conversation bind:this={conversation} {session} />
+          <MessageBox bind:this={messageBox} {session} onfocuscard={() => conversation?.focusLastCard()} />
+        {:else}
+          {#if app.envProblem}
+            <div class="mx-auto mt-4 w-full max-w-[760px] px-6"><EnvBanner /></div>
+          {/if}
+          <div class="flex-1"></div>
+        {/if}
+      </main>
       {#if visible("side")}<div class="host" {@attach dockHost("side")}><SidePanel {project} /></div>{/if}
       {#if visible("viewer")}<div class="host" {@attach dockHost("viewer")}><Viewer {project} /></div>{/if}
       {#if visible("plan")}<div class="host" {@attach dockHost("plan")}><PlanPanel /></div>{/if}
+      {#if visible("prompts")}<div class="host" {@attach dockHost("prompts")}><PromptsPanel /></div>{/if}
       {#if visible("terminal")}<div class="host" {@attach dockHost("terminal")}>{#key project.id}<TerminalDrawer {project} />{/key}</div>{/if}
     </div>
     {#if dock.dragging}<DockOverlay />{/if}
@@ -411,7 +439,6 @@
   }
   .mid {
     flex: 1;
-    min-width: 360px;
     display: flex;
     flex-direction: column;
   }
@@ -420,11 +447,16 @@
     min-height: 0;
     display: flex;
   }
-  .center {
+  .fill {
     flex: 1;
-    min-width: 360px;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+  .fill.empty {
+    align-items: center;
+    justify-content: center;
+    color: var(--fg-faint);
   }
   .col {
     flex-shrink: 0;

@@ -2,8 +2,8 @@
 // Dragging uses pointer events, not HTML drag and drop: with the window's file drop turned on
 // (Tauri dragDropEnabled), WebView2 does not deliver HTML drag events to the page.
 import type { Attachment } from "svelte/attachments";
-import { untrack } from "svelte";
-import { findPanel, isNoop, movePanel, shownPanel, type DropTarget, type PanelId, type Zone } from "../dock";
+import { tick, untrack } from "svelte";
+import { defaultDock, findPanel, isNoop, movePanel, normalizeDock, shownPanel, type DropTarget, type PanelId, type Zone } from "../dock";
 import { app } from "./app.svelte";
 
 /** A place the dragged panel can land, in window pixels. */
@@ -29,9 +29,11 @@ class DockStore {
   visible(p: PanelId): boolean {
     const project = app.active;
     if (!project) return false;
+    if (p === "session") return true;
     if (p === "side") return app.filesVisible;
     if (p === "viewer") return !!app.viewer && app.viewer.projectId === project.id;
     if (p === "plan") return app.planVisible;
+    if (p === "prompts") return app.promptsVisible;
     return app.terminalVisible;
   }
 
@@ -41,18 +43,48 @@ class DockStore {
     return !!at && shownPanel(at.group, (x) => this.visible(x)) === p;
   }
 
-  /** Shows a panel and makes it the active tab of its group. */
+  /** Shows a panel and makes it the active tab of its group. The viewer needs an open file. */
   open(p: PanelId) {
     if (p === "side") app.filesVisible = true;
     else if (p === "plan") app.planVisible = true;
+    else if (p === "prompts") app.promptsVisible = true;
     else if (p === "terminal") app.terminalVisible = true;
+    // A panel that is not in the dock goes back to its default place.
+    if (!findPanel(app.layout.dock, p)) app.layout.dock = normalizeDock(app.layout.dock) ?? defaultDock();
     this.reveal(p);
   }
 
-  /** Hides a panel. The viewer closes its file. */
+  /**
+   * Shows a panel at its place in the dock (the last place it had, which is kept while it is
+   * hidden, else its default place), brings it to the front of its group and moves the keyboard
+   * focus into it. Returns false when the panel cannot show: no project is open, or the viewer
+   * has no file.
+   */
+  async show(p: PanelId): Promise<boolean> {
+    this.open(p);
+    if (!this.visible(p)) return false;
+    app.save();
+    await tick();
+    const slot = this.slots[p];
+    if (!slot) return false;
+    const el =
+      slot.querySelector<HTMLElement>("[data-dock-focus]") ??
+      slot.querySelector<HTMLElement>("textarea:not([disabled]), input:not([disabled]), [contenteditable=true]") ??
+      slot.querySelector<HTMLElement>("button:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])");
+    if (el) el.focus();
+    else {
+      slot.tabIndex = -1;
+      slot.focus();
+    }
+    return true;
+  }
+
+  /** Hides a panel. The viewer closes its file. The Session panel does not hide. */
   close(p: PanelId) {
+    if (p === "session") return;
     if (p === "side") app.filesVisible = false;
     else if (p === "plan") app.planVisible = false;
+    else if (p === "prompts") app.promptsVisible = false;
     else if (p === "terminal") app.terminalVisible = false;
     else app.viewer = null;
     app.save();
@@ -149,9 +181,11 @@ class DockStore {
   /** The drop zones, from the work area and the groups on screen. */
   private measure(p: PanelId): DropZone[] {
     const work = document.querySelector<HTMLElement>("[data-dock-work]")?.getBoundingClientRect();
-    const center = document.querySelector<HTMLElement>("[data-dock-center]")?.getBoundingClientRect();
+    const fill = document.querySelector<HTMLElement>("[data-dock-fill]");
+    const center = fill?.getBoundingClientRect();
     const top = document.querySelector<HTMLElement>("[data-dock-top]")?.getBoundingClientRect();
-    if (!work || !center || !top) return [];
+    if (!work || !fill || !center || !top) return [];
+    const fillId = fill.dataset.dockFill || undefined;
     const d = app.layout.dock;
     const out: DropZone[] = [];
     const edge = 64;
@@ -162,8 +196,15 @@ class DockStore {
     add("left", { kind: "zone", zone: "left" }, { left: work.left, top: work.top, width: edge, height: work.height }, true);
     add("right", { kind: "zone", zone: "right" }, { left: work.right - edge, top: work.top, width: edge, height: work.height }, true);
     add("bottom", { kind: "zone", zone: "bottom" }, { left: top.left, top: top.bottom - edge, width: top.width, height: edge }, true);
-    // The session area: a new group in the editor area, next to it.
-    add("center", { kind: "zone", zone: "center" }, { left: center.left, top: center.top, width: center.width, height: center.height }, false);
+    // The center: a new group right of the group that fills the middle (its right part; the
+    // rest of that group takes the panel as a tab), or the whole empty middle.
+    const cw = fillId ? Math.max(80, Math.round(center.width * 0.35)) : center.width;
+    add(
+      "center",
+      { kind: "zone", zone: "center", after: fillId },
+      { left: center.right - cw, top: center.top, width: cw, height: center.height },
+      false,
+    );
     for (const el of document.querySelectorAll<HTMLElement>("[data-dock-group]")) {
       const id = el.dataset.dockGroup!;
       const zone = el.dataset.dockZone as Zone;
