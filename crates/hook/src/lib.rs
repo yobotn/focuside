@@ -7,6 +7,10 @@
 //! always exits 0, reads no environment variable except `FOCUSIDE_EVENTS`, never reads
 //! `transcript_path`, and writes only the fields FocusIDE uses. Hook stdout can reach the
 //! model on some events, so silence is what keeps the hook observe-only.
+//!
+//! Since 2026-11-14 the prompt text of UserPromptSubmit is stored too (owner decision), so the
+//! Prompts panel can show each prompt with its answer. The event file lives in FocusIDE's app
+//! data only; FocusIDE never writes it into the repo and never sends it anywhere.
 
 use serde_json::{json, Map, Value};
 use std::io::Read;
@@ -18,7 +22,7 @@ pub const SCHEMA: u64 = 1;
 
 /// The largest stdin read. Longer input is cut, which makes it invalid JSON and ignored.
 const MAX_INPUT: u64 = 16 * 1024 * 1024;
-/// The longest plan and last message kept, in bytes.
+/// The longest plan, prompt and last message kept, in bytes.
 const MAX_TEXT: usize = 64 * 1024;
 const MAX_SHORT: usize = 4 * 1024;
 
@@ -130,6 +134,12 @@ pub fn event_from(input: &[u8], agent: &str) -> Option<Value> {
         out.insert("mode".into(), s);
     }
     match name {
+        "UserPromptSubmit" => {
+            // Claude Code, Codex and Gemini CLI (BeforeAgent) all name it `prompt`.
+            if let Some(s) = text(&v["prompt"], MAX_TEXT) {
+                out.insert("prompt".into(), s);
+            }
+        }
         "Stop" => {
             // Gemini CLI calls the last answer `prompt_response`.
             let msg = if v["last_assistant_message"].is_string() {
@@ -245,8 +255,12 @@ mod tests {
         );
         assert_eq!(e["event"], "UserPromptSubmit");
         assert_eq!(e["sessionId"], "s1");
-        assert!(e.get("prompt").is_none(), "the prompt is not stored");
+        assert_eq!(
+            e["prompt"], "secret",
+            "the prompt is stored for the Prompts panel"
+        );
         assert!(e.get("transcript_path").is_none());
+        assert!(e.get("transcriptPath").is_none());
 
         let e = ev(
             json!({"hook_event_name": "Stop", "last_assistant_message": "Done."}),
@@ -347,8 +361,12 @@ mod tests {
         );
         assert_eq!(e["event"], "Stop");
         assert_eq!(e["lastMessage"], "ok");
-        let e = ev(json!({"hook_event_name": "BeforeAgent"}), "gemini");
+        let e = ev(
+            json!({"hook_event_name": "BeforeAgent", "prompt": "hi"}),
+            "gemini",
+        );
         assert_eq!(e["event"], "UserPromptSubmit");
+        assert_eq!(e["prompt"], "hi");
         // Gemini names mean nothing for other agents.
         assert!(event_from(br#"{"hook_event_name":"AfterAgent"}"#, "claude").is_none());
     }
@@ -369,6 +387,11 @@ mod tests {
             "claude",
         );
         assert!(e["lastMessage"].as_str().unwrap().len() <= MAX_TEXT);
+        let e = ev(
+            json!({"hook_event_name": "UserPromptSubmit", "prompt": long}),
+            "claude",
+        );
+        assert!(e["prompt"].as_str().unwrap().len() <= MAX_TEXT);
     }
 
     #[test]

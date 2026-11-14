@@ -16,8 +16,11 @@
 //! sequence (`MODE_KEY`) on a user click, only while no prompt runs (see `mode_key_ready`).
 //!
 //! Events go to the UI as `session` events, like chat sessions: `turn_started`, `turn_ended`,
-//! `turn_untracked`, `pane_started`, `pane_exited`, `pane_working`, `pane_idle`, `pane_plan`,
-//! `pane_todos`, `pane_mode`, `hooks_live`.
+//! `turn_untracked`, `pane_started`, `pane_exited`, `pane_prompt`, `pane_working`, `pane_idle`,
+//! `pane_plan`, `pane_todos`, `pane_mode`, `hooks_live`.
+//!
+//! `pane_prompt` carries the prompt text from UserPromptSubmit and `pane_idle` the last answer
+//! from Stop, for the Prompts panel. The UI keeps them in FocusIDE's app data only.
 
 use crate::project::Project;
 use crate::pty::Launch;
@@ -364,6 +367,7 @@ impl Pane {
         }
         match event {
             "UserPromptSubmit" => {
+                self.emit("pane_prompt", json!({ "text": ev["prompt"].as_str() }));
                 self.st.lock().unwrap().working = true;
                 self.emit("pane_working", json!({}));
                 // Also closes a turn whose Stop never came (interrupt).
@@ -372,6 +376,7 @@ impl Pane {
             }
             "Stop" | "StopFailure" => {
                 let failure = ev["error"].as_str().map(String::from);
+                let last = ev["lastMessage"].as_str().map(String::from);
                 {
                     let mut st = self.st.lock().unwrap();
                     st.working = false;
@@ -389,7 +394,10 @@ impl Pane {
                     "stopFailure"
                 };
                 self.end_locked(reason).await;
-                self.emit("pane_idle", json!({ "failure": failure }));
+                self.emit(
+                    "pane_idle",
+                    json!({ "failure": failure, "lastMessage": last }),
+                );
             }
             "PreToolUse" | "PostToolUse" => self.on_tool(event, &ev),
             _ => {}
@@ -468,7 +476,12 @@ impl Pane {
             return;
         }
         if !self.recorder.claim() {
-            self.emit("turn_untracked", json!({ "reason": "otherRunning" }));
+            // The session that holds the project, so the UI can name it.
+            let holder = self.project.running_session();
+            self.emit(
+                "turn_untracked",
+                json!({ "reason": "otherRunning", "holder": holder }),
+            );
             return;
         }
         let id = new_id("t");
@@ -661,6 +674,16 @@ mod tests {
         .await;
         p.on_hook(hook("Stop", json!({ "lastMessage": "Changed a.txt." })))
             .await;
+        let idle = f
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|e| e["kind"] == "pane_idle")
+            .cloned()
+            .unwrap();
+        assert_eq!(idle["lastMessage"], "Changed a.txt.");
         assert!(!p.holds_claim(), "Stop releases the claim");
         assert!(chat.claim());
         chat.release();
@@ -686,8 +709,19 @@ mod tests {
         p.on_pty_open().await;
         let chat = TurnRecorder::new(f.project.clone(), "chat");
         assert!(chat.claim());
-        p.on_hook(hook("UserPromptSubmit", json!({}))).await;
-        assert!(kinds(&f).contains(&"turn_untracked".to_string()));
+        p.on_hook(hook("UserPromptSubmit", json!({ "prompt": "Fix it" })))
+            .await;
+        let evs = f.events.lock().unwrap().clone();
+        let untracked = evs.iter().find(|e| e["kind"] == "turn_untracked").unwrap();
+        assert_eq!(
+            untracked["holder"], "chat",
+            "names the session that holds the project"
+        );
+        let prompt = evs.iter().find(|e| e["kind"] == "pane_prompt").unwrap();
+        assert_eq!(
+            prompt["text"], "Fix it",
+            "an untracked prompt still shows its text"
+        );
         assert!(!p.holds_claim());
         p.on_hook(hook("Stop", json!({}))).await;
         assert!(!kinds(&f).contains(&"turn_ended".to_string()));

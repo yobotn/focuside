@@ -109,11 +109,15 @@ fn every_event_is_silent_and_written() {
         assert_eq!(names.len(), i + 1, "one file per event: {names:?}");
         assert!(names.iter().all(|n| n.ends_with(".json")), "{names:?}");
     }
-    // Each file is valid JSON with the schema version.
-    for n in files(dir.path()) {
+    // Each file is valid JSON with the schema version. The first one (UserPromptSubmit) keeps
+    // the prompt text for the Prompts panel.
+    for (i, n) in files(dir.path()).into_iter().enumerate() {
         let v: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.path().join(n)).unwrap()).unwrap();
         assert_eq!(v["v"], 1);
+        if i == 0 {
+            assert_eq!(v["prompt"], "hi");
+        }
     }
 }
 
