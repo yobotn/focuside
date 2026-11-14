@@ -108,3 +108,12 @@ if (registry)
   console.log(unexpected ? `\n${unexpected} command(s) differ from the registry. Check the vendor docs.` : "\nNo unexpected differences.");
 // exitCode, not process.exit: exiting right after fetch trips a libuv assertion on Windows.
 if (registry) process.exitCode = strict && unexpected ? 1 : 0;
+
+// FocusIDE also reads Claude Code's own screen: the permission mode status line (plan mode
+// switch) and the terminal title (tab names). Both live in apps/desktop/src/lib/tui.ts and fail
+// quietly when they stop matching. Re-check them by hand after a Claude Code update.
+console.log(
+  "\nClaude TUI strings (apps/desktop/src/lib/tui.ts): run\n" +
+    "  cargo test -p focuside-desktop -- --ignored real_claude_mode_strings --nocapture\n" +
+    "and compare the status lines and titles it prints with CLAUDE_MODE_LINES and titleTopic.",
+);

@@ -34,6 +34,8 @@ node scripts/check-agents.mjs    # compare agent launch commands with the ACP re
 
 Once a month, run `node scripts/check-agents.mjs` (or the "Agent commands" workflow, which runs on the 1st of each month and on demand). It compares each `AgentSpec` in `crates/core/src/agent.rs` with the ACP registry and prints the differences. It needs the network, so CI does not run it on every push. It only reports; `--strict` exits 1 on a difference that is not listed as known. When it reports a difference, check the vendor docs, then update `agent.rs`, the comments there and PLAN.md section 10. Never make FocusIDE install an agent.
 
+Monthly check, also after a Claude Code update: FocusIDE reads Claude's own screen. The strings are in `apps/desktop/src/lib/tui.ts` (`CLAUDE_MODE_LINES` for the plan mode switch, `titleTopic` for tab names, `imagePasteKey`). Run `cargo test -p focuside-desktop -- --ignored real_claude_mode_strings --nocapture` and compare the status lines and titles it prints with that file. When they stop matching, the features turn off quietly (the switch is disabled, tabs keep their names), so nothing else tells you.
+
 `npm run lint` and `npm test` must pass before you commit.
 
 ## Rules
