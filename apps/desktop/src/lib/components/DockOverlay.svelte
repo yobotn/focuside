@@ -12,14 +12,11 @@
 
   function preview(z: DropZone): DropZone["rect"] {
     const r = z.rect;
-    if (z.target.kind === "group") return r;
+    // The center zone is already the part of the middle where the new group goes.
+    if (z.target.kind === "group" || z.target.zone === "center") return r;
     const w = Math.min(DEFAULT_WIDTH[p], window.innerWidth * 0.35);
     if (z.target.zone === "left") return { left: r.left, top: r.top, width: w, height: r.height };
     if (z.target.zone === "right") return { left: r.left + r.width - w, top: r.top, width: w, height: r.height };
-    if (z.target.zone === "center") {
-      const cw = Math.min(w, r.width / 2);
-      return { left: r.left + r.width - cw, top: r.top, width: cw, height: r.height };
-    }
     const h = Math.min(app.layout.bottomHeight, window.innerHeight * 0.4);
     return { left: r.left, top: r.top + r.height - h, width: r.width, height: h };
   }

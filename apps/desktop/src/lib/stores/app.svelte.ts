@@ -70,7 +70,7 @@ export function agentNote(id: string): string {
 
 export type SessionTabs = "top" | "side";
 
-/** Panel places and sizes. The dock holds the side bar, viewer, plan and terminal (see lib/dock.ts). */
+/** Panel places and sizes. The dock holds the Session panel, side bar, viewer, plan, prompts and terminal (see lib/dock.ts). */
 export interface Layout {
   dock: Dock;
   /** Height of the bottom zone in pixels. */
@@ -85,7 +85,10 @@ export function defaultLayout(): Layout {
   return { dock: defaultDock(), bottomHeight: DEFAULT_BOTTOM, sideView: "files", turnsVisible: true };
 }
 
-/** A saved layout, including one saved before docking (filesSide, viewerSide, terminalHeight). */
+/**
+ * A saved layout, including one saved before docking (filesSide, viewerSide, terminalHeight)
+ * and one saved before the Session and Prompts panels (they go to their default places).
+ */
 function loadLayout(raw: Record<string, unknown> | undefined): Layout {
   const out = defaultLayout();
   if (!raw) return out;
@@ -555,7 +558,7 @@ class AppStore {
   showPlan() {
     this.planVisible = true;
     this.panelRequest = { panel: "plan", seq: ++this.panelSeq };
-    import("./dock.svelte").then(({ dock }) => dock.open("plan")).catch(() => {});
+    import("./dock.svelte").then(({ dock }) => dock.show("plan")).catch(() => {});
   }
 
   /** Shows the Prompts panel, opened at one prompt when `id` is given. The dock shows the panel
@@ -566,7 +569,7 @@ class AppStore {
     this.promptsFocus = { sessionKey, id, seq };
     this.panelRequest = { panel: "prompts", seq };
     import("./dock.svelte")
-      .then(({ dock }) => (dock.open as (p: string) => void)("prompts"))
+      .then(({ dock }) => dock.show("prompts"))
       .catch(() => {});
   }
 

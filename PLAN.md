@@ -222,7 +222,7 @@ Gap we fill: one calm app built around reading and approving agent work, with a 
 - **Identity bar** (top): project, branch, session tabs (or the session name when "Session tabs in the top bar" is off), agent and model (click to change model), context usage when the adapter reports it, waiting count.
 - **Window title:** `project - session name - FocusIDE`, plus the total waiting count, so the taskbar, Dock and Alt+Tab show it.
 - **Side bar** (left): Files or Sessions, open by default, Mod+B hides it. CLAUDE.md pinned at the top of Files when it exists.
-- **Panels move:** the side bar, viewer, plan and terminal dock left, right, bottom or in the center next to the conversation, alone or as tabs. See "Panel docking (2026-11-13)" in section 10.
+- **Panels move:** the session (agent pane or conversation), side bar, viewer, plan, prompts and terminal dock left, right, bottom or in the center, alone or as tabs. See "Panel docking (2026-11-13)" and "Session panel and Prompts (2026-11-14)" in section 10.
 - **Conversation** (center): max 760px wide, reads like a document. Tool calls show as one line ("Read src/main.rs"). Long conversations use a virtualized list.
 - **Viewer** (center, next to the conversation, with the Plan as a second tab): opens only when a file or diff is opened. Code in CodeMirror, markdown rendered, toggle to source. If the agent changes a file with unsaved edits: "Changed on disk. Reload / Keep mine".
 - **Terminal:** bottom drawer, one terminal in v1, hidden until opened (Mod+`).
@@ -777,6 +777,22 @@ Verified on this machine (Windows 11, Claude Code 2.1.323):
 - `npm run lint` and `npm test` pass.
 
 Not verified: the app window (paste, right click and the image key in WebView2, the switch with xterm.js, the Plan and Prompts panels, the dot strip, the Settings row). The terminal title Claude sets after a prompt (nothing typed a prompt; the title rules come from the docs). The prompt text and `last_assistant_message` in a live hook payload. Whether Claude writes plan files into `plansDirectory` from `--settings` (needs a plan made by a real prompt). The Prompts panel is not in the dock yet: the dock work registers it under the id "prompts".
+
+### Session panel and Prompts (2026-11-14)
+
+The owner asked: "The plan / md / image viewer / reader panel should be able to move into the center in place of the terminal, and the same for the terminal to be on the other side." Here "terminal" is the session area (the agent pane).
+
+| Decision | Why |
+|---|---|
+| The session area is a normal panel named "Session": the identity bar, then the agent pane or the conversation of the active session. It moves like the others (drag its header outside the session tabs, or its grip; "Move to" in the grip menu) and can be a tab next to other panels. It has no close button and is always visible while a project is open | Owner request |
+| One center group fills the free width: the group with the Session panel, else the first center group. Other center groups have a width; the ones before the fill group have their splitter on the right, the ones after it on the left. When no center group is visible, the middle shows "Drag a panel here." | Any panel can sit in the center, for example the viewer when the Session panel is on the right |
+| Drop zones in the center: the right 35 percent of the fill group makes a new center group right after it, the rest of the fill group adds the panel as a tab, other groups add it as a tab. "Move to: Center" in the grip menu puts a new group after the Session panel's group, else last | Keeps "next to the conversation" from the first docking version and adds "in place of it" |
+| The Session panel keeps at least 360 px wherever it is: its minimum width is 360 px in a side or center group, and the middle keeps 360 px when it sits in the bottom zone. When the groups with a width do not fit, each one gives up width in proportion to its size, down to its minimum (before, every group dropped to its minimum) | Section 5 rule |
+| The Session panel renders once in the hidden pool and its element moves into its slot, like the other panels. Moving it does not remount the agent pane: no second `pty_open`, the xterm.js screen stays. (Pane terminals also live in `paneterm` per session, so even a remount would keep them.) | No restart of the agent |
+| New Prompts panel (`PromptsPanel.svelte`, no props). A placeholder with the text "Prompts in this session show here." stands in until the real panel lands. Default place: a tab in the Viewer and Plan group. Hidden until shown; its visibility is not saved between runs, like the Plan | Owner: keep the default layout simple |
+| Default layout (owner approved): side bar left, Session in the center, Viewer, Plan and Prompts as tabs to the right of it, terminal at the bottom and hidden until opened | Unchanged for existing users |
+| `dock.show(id)` shows a panel at its place in the dock (the place is kept while it is hidden, so it is the last place, else the default), makes it the active tab and moves the keyboard focus into it (`[data-dock-focus]`, else the first text field, else the first control). It returns false when the panel cannot show (no project, or the viewer without a file). Palette: "Show plan" (was "Show or hide plan"), "Show prompts", "Show session" | Other code (for example the plan arriving) can open a panel by id |
+| Saved layouts: `layout.dock` keeps its format. A dock saved before this change has no "session" and no "prompts": the Session panel goes first in the center (where the session area was) and Prompts joins the Viewer and Plan group. Older layouts from before docking convert as before, then get the same two panels | No lost layout on update |
 
 ## 11. Open items
 

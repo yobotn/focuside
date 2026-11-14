@@ -1,13 +1,14 @@
-// The panel layout around the session area. Four dock zones hold groups, and a group holds one
-// or more panels as tabs. Left and right run the full height. Center groups sit beside the
-// session area (the editor area, where the viewer and the plan open). Bottom runs under the
-// session area and the center groups. The session area itself always stays in the center.
+// The panel layout. Four dock zones hold groups, and a group holds one or more panels as tabs.
+// Left and right run the full height. Center groups sit side by side in the middle; one of them
+// fills the space that is left (the group with the Session panel, else the first one). Bottom
+// runs under the center groups. Every panel can move, the Session panel too (the agent pane or
+// the conversation of the active session).
 // Pure functions only, so the layout can be checked and changed without the UI.
 
-export type PanelId = "side" | "viewer" | "plan" | "terminal";
+export type PanelId = "session" | "side" | "viewer" | "plan" | "prompts" | "terminal";
 export type Zone = "left" | "center" | "right" | "bottom";
 
-export const PANELS: PanelId[] = ["side", "viewer", "plan", "terminal"];
+export const PANELS: PanelId[] = ["session", "side", "viewer", "plan", "prompts", "terminal"];
 export const ZONES: Zone[] = ["left", "center", "right", "bottom"];
 
 /** Panels in one place. `size` is the width in pixels (not used in the bottom zone). */
@@ -21,11 +22,16 @@ export interface DockGroup {
 /** Groups per zone, in screen order (left to right). */
 export type Dock = Record<Zone, DockGroup[]>;
 
-/** Where a dragged panel lands: a new group at the outer edge of a zone, or a tab in a group. */
-export type DropTarget = { kind: "zone"; zone: Zone } | { kind: "group"; zone: Zone; id: string };
+/**
+ * Where a dragged panel lands: a new group in a zone, or a tab in a group. A new group goes to
+ * the outer edge (left, right), last (bottom), or in the center right after the group `after`
+ * (default: the group with the Session panel, else last).
+ */
+export type DropTarget = { kind: "zone"; zone: Zone; after?: string } | { kind: "group"; zone: Zone; id: string };
 
-export const MIN_WIDTH: Record<PanelId, number> = { side: 160, viewer: 320, plan: 280, terminal: 240 };
-export const DEFAULT_WIDTH: Record<PanelId, number> = { side: 248, viewer: 640, plan: 640, terminal: 480 };
+/** The Session panel keeps at least 360 px wherever it is (PLAN.md section 5). */
+export const MIN_WIDTH: Record<PanelId, number> = { session: 360, side: 160, viewer: 320, plan: 280, prompts: 240, terminal: 240 };
+export const DEFAULT_WIDTH: Record<PanelId, number> = { session: 640, side: 248, viewer: 640, plan: 640, prompts: 320, terminal: 480 };
 export const DEFAULT_BOTTOM = 260;
 
 let seq = 0;
@@ -38,10 +44,14 @@ function group(p: PanelId, size = DEFAULT_WIDTH[p]): DockGroup {
   return { id: groupId(), panels: [p], active: p, size };
 }
 
-/** Side bar on the left, the viewer and the plan as tabs in the editor area, terminal below. */
+/**
+ * Side bar on the left. In the center the Session panel, then the viewer, the plan and the
+ * prompts as tabs (the editor area). Terminal below. Plan, prompts and terminal stay hidden
+ * until they open.
+ */
 export function defaultDock(): Dock {
-  const editor: DockGroup = { id: groupId(), panels: ["viewer", "plan"], active: "viewer", size: DEFAULT_WIDTH.viewer };
-  return { left: [group("side")], center: [editor], right: [], bottom: [group("terminal")] };
+  const editor: DockGroup = { id: groupId(), panels: ["viewer", "plan", "prompts"], active: "viewer", size: DEFAULT_WIDTH.viewer };
+  return { left: [group("side")], center: [group("session"), editor], right: [], bottom: [group("terminal")] };
 }
 
 /** The dock from the layout saved before docking (files and viewer on a side, terminal below). */
@@ -56,7 +66,8 @@ export function legacyDock(old: { filesSide?: unknown; viewerSide?: unknown; fil
   else d.left.push(files);
   if (old.viewerSide === "left") d.left.push(viewer);
   else d.center.push(viewer);
-  return d;
+  // The Session panel and Prompts did not exist then. They go to their default places.
+  return normalizeDock(d)!;
 }
 
 /** A saved dock as it can be trusted: known panels, each exactly once, no empty groups. */
@@ -84,7 +95,9 @@ export function normalizeDock(raw: unknown): Dock | null {
     }
   }
   // A panel missing from the saved dock (for example one added in a later version) goes back to
-  // its default place: a tab next to a panel of its default group, or a new group.
+  // its default place: a tab next to a panel of its default group, or a new group. Docks saved
+  // before the Session panel could move had the session area before all center groups, so the
+  // Session panel goes first in the center and such a layout looks the same as before.
   const home = defaultDock();
   for (const p of PANELS) {
     if (seen.has(p)) continue;
@@ -113,9 +126,9 @@ export function findGroup(d: Dock, id: string): { zone: Zone; group: DockGroup }
   return null;
 }
 
-/** New groups go to the outer edge (left, right), next to the session area (center), or last. */
-function atStart(zone: Zone): boolean {
-  return zone === "left" || zone === "center";
+/** The center group that fills the free space: the one with the Session panel, else the first. */
+export function fillGroup(list: DockGroup[]): DockGroup | null {
+  return list.find((g) => g.panels.includes("session")) ?? list[0] ?? null;
 }
 
 function clone(d: Dock): Dock {
@@ -127,28 +140,38 @@ function clone(d: Dock): Dock {
   };
 }
 
+/** The panels of each group in screen order, without ids, sizes or active tabs. */
+function shape(d: Dock): string {
+  return JSON.stringify(ZONES.map((z) => d[z].map((g) => g.panels)));
+}
+
 /** True when the drop would leave the layout as it is. */
 export function isNoop(d: Dock, p: PanelId, to: DropTarget): boolean {
   const from = findPanel(d, p);
   if (!from) return false;
   if (to.kind === "group") return to.id === from.group.id;
-  if (from.zone !== to.zone || from.group.panels.length > 1) return false;
-  // Alone in a group: a no-op when it already sits where a new group would go.
-  const list = d[to.zone];
-  const outer = atStart(to.zone) ? list[0] : list[list.length - 1];
-  return outer === from.group;
+  if (from.group.panels.length > 1) return false;
+  return shape(place(d, p, to)) === shape(d);
 }
 
 /** Moves a panel to a drop target and returns the new dock. The panel becomes the active tab. */
 export function movePanel(d: Dock, p: PanelId, to: DropTarget): Dock {
   if (isNoop(d, p, to)) return d;
+  return place(d, p, to);
+}
+
+function place(d: Dock, p: PanelId, to: DropTarget): Dock {
   const out = clone(d);
   const from = findPanel(out, p);
+  // The panel's own group, when it goes away: a new group "after" it takes its place.
+  let gone: { zone: Zone; index: number; id: string } | null = null;
   if (from) {
     const g = from.group;
     g.panels = g.panels.filter((x) => x !== p);
-    if (!g.panels.length) out[from.zone] = out[from.zone].filter((x) => x !== g);
-    else if (g.active === p) g.active = g.panels[0];
+    if (!g.panels.length) {
+      gone = { zone: from.zone, index: out[from.zone].indexOf(g), id: g.id };
+      out[from.zone] = out[from.zone].filter((x) => x !== g);
+    } else if (g.active === p) g.active = g.panels[0];
   }
   const target = to.kind === "group" ? findGroup(out, to.id) : null;
   if (target) {
@@ -158,8 +181,16 @@ export function movePanel(d: Dock, p: PanelId, to: DropTarget): Dock {
     return out;
   }
   const g = group(p);
-  if (atStart(to.zone)) out[to.zone].unshift(g);
-  else out[to.zone].push(g);
+  const list = out[to.zone];
+  if (to.zone === "left") list.unshift(g);
+  else if (to.zone === "center") {
+    const session = findPanel(out, "session");
+    const after = (to.kind === "zone" && to.after) || (session?.zone === "center" ? session.group.id : null);
+    const i = after ? list.findIndex((x) => x.id === after) : -1;
+    if (i >= 0) list.splice(i + 1, 0, g);
+    else if (after && gone?.id === after && gone.zone === "center") list.splice(gone.index, 0, g);
+    else list.push(g);
+  } else list.push(g);
   return out;
 }
 
