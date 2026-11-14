@@ -4,9 +4,11 @@ mod commands;
 mod files;
 mod hooks;
 mod pane;
+mod plan_folder;
 mod project;
 mod pty;
 mod session;
+mod session_data;
 mod turn_recorder;
 mod turns;
 
@@ -26,6 +28,9 @@ pub struct AppState {
     pub ptys: Mutex<HashMap<String, pty::Pty>>,
     /// Folders passed on the command line (`focuside .`) before the UI was ready.
     pub startup_paths: Mutex<Vec<String>>,
+    /// Settings > "Plan folder" inside the project (relative, forward slashes). Snapshots and
+    /// the turn watch log skip it in every project. None: Claude's default folder.
+    pub plan_folder: Mutex<Option<String>>,
 }
 
 /// Folder arguments from a command line, resolved against `cwd`.
@@ -95,6 +100,7 @@ pub fn run() {
                 panes: Mutex::default(),
                 ptys: Mutex::default(),
                 startup_paths: Mutex::new(folder_args(&argv, &cwd)),
+                plan_folder: Mutex::default(),
             });
             Ok(())
         })
@@ -120,6 +126,11 @@ pub fn run() {
             commands::session_set_config,
             commands::session_list,
             commands::pane_mode_key,
+            commands::plan_folder_set,
+            commands::plan_folder_status,
+            commands::plan_folder_gitignore,
+            commands::session_data_load,
+            commands::session_data_save,
             commands::claude_route,
             commands::hooks_info,
             commands::turn_undo_preview,

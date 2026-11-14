@@ -119,6 +119,9 @@ pub struct ShadowRepo {
     gitconfig: PathBuf,
     git: PathBuf,
     pub lock: Mutex<()>,
+    /// Folders (relative, forward slashes) that snapshots never cover, such as the plan folder
+    /// the user picked in Settings. The flag says the list changed since the last snapshot.
+    skip: std::sync::Mutex<(Vec<String>, bool)>,
 }
 
 pub struct Output {
@@ -142,6 +145,7 @@ impl ShadowRepo {
             gitconfig,
             git: git.to_path_buf(),
             lock: Mutex::new(()),
+            skip: std::sync::Mutex::new((vec![], false)),
         };
         if !repo.git_dir.join("HEAD").exists() {
             repo.init().await?;
@@ -151,6 +155,25 @@ impl ShadowRepo {
 
     pub fn work_tree(&self) -> &Path {
         &self.work_tree
+    }
+
+    /// Sets the folders snapshots skip (relative to the work tree, forward slashes). Files in
+    /// them never show up as turn changes and Undo never touches them.
+    pub fn set_skip_dirs(&self, dirs: Vec<String>) {
+        let mut st = self.skip.lock().unwrap();
+        if st.0 != dirs {
+            *st = (dirs, true);
+        }
+    }
+
+    /// True when `rel` (forward slashes) is a skipped folder or inside one.
+    pub fn is_skipped(&self, rel: &str) -> bool {
+        self.skip
+            .lock()
+            .unwrap()
+            .0
+            .iter()
+            .any(|d| rel == d || rel.starts_with(&format!("{d}/")))
     }
 
     async fn init(&self) -> Result<()> {
@@ -267,7 +290,33 @@ impl ShadowRepo {
             }
             exclude.push('\n');
         }
+        let (skip, changed) = {
+            let mut st = self.skip.lock().unwrap();
+            let changed = std::mem::replace(&mut st.1, false);
+            (st.0.clone(), changed)
+        };
+        for d in &skip {
+            exclude.push('/');
+            for ch in d.chars() {
+                if "*?[]\\!#".contains(ch) {
+                    exclude.push('\\');
+                }
+                exclude.push(ch);
+            }
+            exclude.push_str("/\n");
+        }
         std::fs::write(self.git_dir.join("info/exclude"), exclude)?;
+        if changed {
+            // Files an earlier snapshot already had stay in the index until removed from it.
+            for d in &skip {
+                let _ = self
+                    .raw(
+                        &["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", d],
+                        None,
+                    )
+                    .await;
+            }
+        }
 
         // --ignore-errors: a locked file is reported and skipped instead of failing the add.
         let add = self
@@ -876,6 +925,40 @@ mod tests {
         );
         // The ignored .env file was never touched.
         assert_eq!(fs::read(p.join(".env")).unwrap(), b"SECRET=1\n");
+    }
+
+    #[tokio::test]
+    async fn skipped_folders_are_not_covered() {
+        let (proj, _data, repo) = setup().await;
+        let p = proj.path();
+        fs::create_dir_all(p.join("plans")).unwrap();
+        fs::write(p.join("plans/old.md"), "old\n").unwrap();
+        // The folder was covered before the user picked it as the plan folder.
+        repo.snapshot("refs/fi/s/9/a", "a").await.unwrap();
+        repo.set_skip_dirs(vec!["plans".into()]);
+        assert!(repo.is_skipped("plans/x.md") && repo.is_skipped("plans"));
+        assert!(!repo.is_skipped("plansx/a.md"));
+        let start = repo.snapshot("refs/fi/s/9/start", "start").await.unwrap();
+        fs::write(p.join("plans/new.md"), "plan\n").unwrap();
+        fs::write(p.join("plans/old.md"), "changed\n").unwrap();
+        fs::write(p.join("src/a.rs"), "edit\n").unwrap();
+        let end = repo.snapshot("refs/fi/s/9/end", "end").await.unwrap();
+        let changes = repo.diff(&start.commit, &end.commit).await.unwrap();
+        let paths: Vec<_> = changes.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/a.rs"], "plan files are not turn changes");
+        let changed = repo
+            .changed_paths(&start.commit, &end.commit)
+            .await
+            .unwrap();
+        repo.restore(&start.commit, &changed).await.unwrap();
+        assert_eq!(
+            fs::read_to_string(p.join("plans/new.md")).unwrap(),
+            "plan\n"
+        );
+        assert_eq!(
+            fs::read_to_string(p.join("plans/old.md")).unwrap(),
+            "changed\n"
+        );
     }
 
     #[tokio::test]

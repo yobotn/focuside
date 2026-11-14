@@ -431,7 +431,8 @@ pub struct TuiCommand {
 }
 
 /// Flags pane mode never passes: they force a login method, skip the user's setup, run without
-/// a human, or put FocusIDE text into the model context.
+/// a human, or put FocusIDE text into the model context. One narrow exception for `--settings`:
+/// `plans_dir_args` passes it with a JSON object that holds only `plansDirectory`.
 pub const FORBIDDEN_TUI_FLAGS: &[&str] = &[
     "-p",
     "--print",
@@ -452,7 +453,58 @@ pub fn tui_plan_args(id: &str) -> &'static [&'static str] {
     }
 }
 
+/// The settings key Claude Code reads for the plan file folder (settings reference,
+/// `plansDirectory`: "a path relative to the project root", default `~/.claude/plans`).
+pub const PLANS_DIRECTORY_KEY: &str = "plansDirectory";
+
+/// A plan folder the user picked, as a clean relative path with forward slashes, or None when
+/// it is empty, absolute, has a drive letter, leaves the project (`..`) or has control
+/// characters. Claude Code ignores a folder outside the project root and a backslash on macOS
+/// and Linux, so both are refused here.
+pub fn clean_plans_folder(folder: &str) -> Option<String> {
+    let f = folder.trim().replace('\\', "/");
+    if f.is_empty() || f.len() > 200 || f.starts_with('/') || f.chars().any(char::is_control) {
+        return None;
+    }
+    if f.len() >= 2 && f.as_bytes()[1] == b':' {
+        return None;
+    }
+    let parts: Vec<&str> = f
+        .split('/')
+        .filter(|p| !p.is_empty() && *p != ".")
+        .collect();
+    if parts.is_empty() || parts.contains(&"..") {
+        return None;
+    }
+    Some(parts.join("/"))
+}
+
+/// Arguments that set Claude's plan folder for one session: `--settings` with a JSON object that
+/// holds only `plansDirectory`. The settings docs: `--settings` applies "above your user,
+/// project, and local files", "a key you leave out keeps its value from those files", and it
+/// "doesn't write to any file". So the user's hooks, permissions and other keys stay as they
+/// are. Claude only; None for other agents and for a folder `clean_plans_folder` refuses.
+pub fn plans_dir_args(id: &str, folder: &str) -> Option<Vec<String>> {
+    if id != "claude" {
+        return None;
+    }
+    let f = clean_plans_folder(folder)?;
+    let json = serde_json::json!({ PLANS_DIRECTORY_KEY: f }).to_string();
+    Some(vec!["--settings".to_string(), json])
+}
+
 impl TuiCommand {
+    /// Adds `plans_dir_args`. Returns false when nothing was added.
+    pub fn set_plans_folder(&mut self, id: &str, folder: &str) -> bool {
+        match plans_dir_args(id, folder) {
+            Some(a) => {
+                self.args.extend(a);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Adds the agent's plan mode arguments (see `tui_plan_args`). Returns false when the agent
     /// has none.
     pub fn start_in_plan_mode(&mut self, id: &str) -> bool {
@@ -675,6 +727,39 @@ mod tests {
         assert!(other.args.is_empty());
         assert_eq!(tui_command("custom"), Err(Missing::Agent));
         assert_eq!(tui_command("nope"), Err(Missing::Agent));
+    }
+
+    #[test]
+    fn plan_folder_is_the_only_settings_key() {
+        let args = plans_dir_args("claude", "plans").unwrap();
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "--settings");
+        let v: serde_json::Value = serde_json::from_str(&args[1]).unwrap();
+        let obj = v.as_object().unwrap();
+        assert_eq!(
+            obj.len(),
+            1,
+            "only plansDirectory, nothing that changes login or hooks"
+        );
+        assert_eq!(v["plansDirectory"], "plans");
+        assert_eq!(
+            clean_plans_folder(r" docs\plans/ ").as_deref(),
+            Some("docs/plans")
+        );
+        assert_eq!(clean_plans_folder("./a/./b").as_deref(), Some("a/b"));
+        for bad in [
+            "", " ", "/abs", r"\abs", r"C:\x", "c:/x", "../x", "a/../b", "a\nb", ".",
+        ] {
+            assert_eq!(clean_plans_folder(bad), None, "{bad:?}");
+        }
+        assert_eq!(plans_dir_args("codex", "plans"), None);
+        let mut tui = TuiCommand {
+            program: PathBuf::from("claude"),
+            args: vec![],
+        };
+        assert!(tui.set_plans_folder("claude", "plans"));
+        assert!(!tui.set_plans_folder("claude", "../out"));
+        assert_eq!(tui.args.len(), 2);
     }
 
     #[test]

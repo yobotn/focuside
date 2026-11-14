@@ -467,6 +467,8 @@ mod tests {
         screen: Arc<Mutex<vt100::Parser>>,
         asks: Arc<std::sync::atomic::AtomicUsize>,
         answered: usize,
+        /// Every byte the TUI wrote, for the terminal title sequences.
+        raw: Arc<Mutex<Vec<u8>>>,
     }
 
     impl ClaudeScreen {
@@ -475,6 +477,8 @@ mod tests {
             let screen = Arc::new(Mutex::new(vt100::Parser::new(40, 120, 0)));
             let asks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let (screen2, asks2) = (screen.clone(), asks.clone());
+            let raw = Arc::new(Mutex::new(Vec::new()));
+            let raw2 = raw.clone();
             let pty = spawn(
                 &launch,
                 &cwd,
@@ -484,6 +488,7 @@ mod tests {
                 move |b| {
                     let n = String::from_utf8_lossy(b).matches("\x1b[6n").count();
                     asks2.fetch_add(n, Ordering::Relaxed);
+                    raw2.lock().unwrap().extend_from_slice(b);
                     screen2.lock().unwrap().process(b);
                 },
                 || {},
@@ -494,7 +499,36 @@ mod tests {
                 screen,
                 asks,
                 answered: 0,
+                raw,
             }
+        }
+
+        /// The terminal titles the TUI set (OSC 0 and OSC 2), in order.
+        fn titles(&self) -> Vec<String> {
+            let raw = String::from_utf8_lossy(&self.raw.lock().unwrap()).to_string();
+            let mut out = vec![];
+            let mut rest = raw.as_str();
+            while let Some(i) = rest.find("\x1b]") {
+                rest = &rest[i + 2..];
+                let end = rest.find(['\x07', '\x1b']).unwrap_or(rest.len());
+                let body = &rest[..end];
+                if let Some(t) = body.strip_prefix("0;").or_else(|| body.strip_prefix("2;")) {
+                    out.push(t.to_string());
+                }
+                rest = &rest[end..];
+            }
+            out
+        }
+
+        /// The last `n` lines of the screen that are not empty.
+        fn bottom(&self, n: usize) -> Vec<String> {
+            let text = self.screen.lock().unwrap().screen().contents();
+            let lines: Vec<String> = text
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.trim_end().to_string())
+                .collect();
+            lines[lines.len().saturating_sub(n)..].to_vec()
         }
 
         /// Waits until the screen shows `text`, at most `ms`. Returns the screen text.
@@ -556,6 +590,71 @@ mod tests {
             seen.contains(&Some("plan")),
             "the cycle came back to plan mode: {seen:?}"
         );
+    }
+
+    /// The strings the pane reads from the real Claude TUI: the status line of each permission
+    /// mode and the terminal titles. Starts `claude` in its default mode, prints the bottom lines
+    /// after each Shift+Tab (ESC [Z, at most 5) and the OSC 0 and OSC 2 titles. Only the mode key
+    /// is sent: no prompt, no Enter.
+    /// `cargo test -p focuside-desktop -- --ignored real_claude_mode_strings --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_claude_mode_strings_and_titles() {
+        let tui = focuside_core::agent::tui_command("claude").expect("claude installed");
+        let mut c = ClaudeScreen::start(Launch {
+            program: tui.program.to_string_lossy().to_string(),
+            args: tui.args.clone(),
+            env: vec![],
+        });
+        c.wait_for("shift+tab to cycle", 30000);
+        c.wait(2000);
+        println!("at start: {:?}", c.bottom(3));
+        let mut seen = vec![shown_mode(&c.wait(100))];
+        for _ in 0..5 {
+            c.pty.write(crate::pane::MODE_KEY).unwrap();
+            c.wait(1500);
+            println!("after Shift+Tab: {:?}", c.bottom(3));
+            seen.push(shown_mode(&c.wait(100)));
+        }
+        println!("modes: {seen:?}");
+        println!("titles: {:?}", c.titles());
+        assert!(seen.contains(&Some("plan")), "plan mode shows: {seen:?}");
+    }
+
+    /// Settings > Plan folder: starts the Claude TUI with `--settings {"plansDirectory":...}`
+    /// (the JSON goes through the Windows command line), checks that no settings error shows,
+    /// and opens the local `/status` view (no model call) to print the setting sources. Only
+    /// the command and Esc are typed, no prompt.
+    /// `cargo test -p focuside-desktop -- --ignored real_claude_plan_folder --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_claude_plan_folder() {
+        let mut tui = focuside_core::agent::tui_command("claude").expect("claude installed");
+        assert!(tui.set_plans_folder("claude", "target/plans-test"));
+        println!("args: {:?}", tui.args);
+        let mut c = ClaudeScreen::start(Launch {
+            program: tui.program.to_string_lossy().to_string(),
+            args: tui.args.clone(),
+            env: vec![],
+        });
+        let start = c.wait_for("shift+tab to cycle", 30000);
+        assert!(
+            start.contains("shift+tab to cycle"),
+            "the TUI started: {start} raw: {:?}",
+            String::from_utf8_lossy(&c.raw.lock().unwrap())
+        );
+        assert!(
+            !start.contains("Settings Error"),
+            "no settings error: {start}"
+        );
+        c.wait(1000);
+        c.pty.write(b"/status").unwrap();
+        c.wait_for("/status", 5000);
+        c.pty.write(b"\r").unwrap();
+        let text = c.wait_for("Setting sources", 8000);
+        println!("{text}");
+        c.pty.write(b"\x1b").unwrap();
+        c.wait(500);
     }
 
     /// Brief replies: starts the Claude TUI with the `focuside-brief` plugin, runs the local

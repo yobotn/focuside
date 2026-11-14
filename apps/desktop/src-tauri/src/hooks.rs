@@ -78,6 +78,8 @@ You run in a terminal pane inside FocusIDE. FocusIDE shows your plans and todo l
 
 - Answer in one short line.
 - When you create or change a plan or a todo list, say only: \"Plan updated. See the plan panel.\"
+- When you revise a plan, do not repeat the plan in your reply. The full plan goes only into the plan (ExitPlanMode or the plan file). FocusIDE opens it in the plan panel.
+- After a plan revision, reply in one or two lines: what changed in the plan, and whether you agree or disagree with the user's request, with the reason in one line.
 - When you finish work, say in one line what changed.
 - Do not write long explanations unless the user asks for them.
 ";
@@ -298,6 +300,10 @@ mod tests {
         assert!(style.starts_with("---\n"));
         assert!(style.contains("force-for-plugin: true"));
         assert!(style.contains("keep-coding-instructions: true"));
+        assert!(
+            style.contains("do not repeat the plan"),
+            "a plan revision gets a short reply"
+        );
         assert!(brief.join("hooks/hooks.json").is_file());
     }
 

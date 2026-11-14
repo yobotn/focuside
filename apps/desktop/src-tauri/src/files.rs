@@ -126,7 +126,8 @@ pub fn watch(app: AppHandle, project: &Arc<Project>) {
             }
             if let Some(p) = weak.upgrade() {
                 if let Some(log) = p.watch_log.lock().unwrap().as_mut() {
-                    log.extend(paths.iter().cloned());
+                    // The plan folder never counts as a turn change (Settings > Plan folder).
+                    log.extend(paths.iter().filter(|r| !p.shadow.is_skipped(r)).cloned());
                 }
             }
             let _ = app.emit("fs-changed", json!({ "projectId": id, "paths": paths }));

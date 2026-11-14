@@ -177,6 +177,8 @@ pub async fn project_open(
     let p = Project::open(&root, &state.data_dir, &git)
         .await
         .map_err(|e| format!("{e:#}"))?;
+    let skip: Vec<String> = state.plan_folder.lock().unwrap().iter().cloned().collect();
+    p.shadow.set_skip_dirs(skip);
     state.projects.lock().unwrap().insert(id, p.clone());
     // Watching a big tree takes a moment; never hold up opening the project.
     let watched = p.clone();
@@ -228,7 +230,8 @@ pub async fn project_close(state: State<'_, AppState>, id: String) -> Res<()> {
 /// with true does a Claude pane get `--plugin-dir` with the generated focuside plugin. `brief`
 /// is "Brief replies in Claude panes" (off by default): the plugin copy with the output style.
 /// `plan_first` starts a Claude pane in plan mode (`--permission-mode plan`, see
-/// `agent::tui_plan_args`).
+/// `agent::tui_plan_args`). `plan_folder` is Settings > "Plan folder" inside the project: a
+/// Claude pane gets `--settings` with only `plansDirectory` (see `agent::plans_dir_args`).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn session_start(
@@ -242,6 +245,7 @@ pub async fn session_start(
     hooks: Option<bool>,
     plan_first: Option<bool>,
     brief: Option<bool>,
+    plan_folder: Option<String>,
 ) -> Res<String> {
     let p = project(&state, &project_id)?;
     if mode.as_deref() == Some("pane") {
@@ -249,6 +253,9 @@ pub async fn session_start(
         let mut tui = agent::tui_command(agent_id).map_err(missing)?;
         if plan_first == Some(true) {
             tui.start_in_plan_mode(agent_id);
+        }
+        if let Some(f) = plan_folder.as_deref() {
+            tui.set_plans_folder(agent_id, f);
         }
         let plugin = if agent_id == "claude" && hooks == Some(true) {
             claude_plugin(&state.data_dir, brief == Some(true))
@@ -418,6 +425,70 @@ pub fn pane_mode_key(state: State<'_, AppState>, key: String) -> Res<()> {
     let ptys = state.ptys.lock().unwrap();
     let pty = ptys.get(&pty_id).ok_or("closed")?;
     pty.write(crate::pane::MODE_KEY).map_err(|e| e.to_string())
+}
+
+/// Settings > "Plan folder": None or "" for Claude's default folder, else a folder relative to
+/// the project root. Snapshots and the turn watch log of every project skip it from now on.
+/// Returns the cleaned folder. Err when the folder is not inside the project.
+#[tauri::command]
+pub fn plan_folder_set(state: State<'_, AppState>, folder: Option<String>) -> Res<Option<String>> {
+    let clean = match folder.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(f) => Some(agent::clean_plans_folder(f).ok_or("outside")?),
+    };
+    *state.plan_folder.lock().unwrap() = clean.clone();
+    let skip: Vec<String> = clean.iter().cloned().collect();
+    for p in state.projects.lock().unwrap().values() {
+        p.shadow.set_skip_dirs(skip.clone());
+    }
+    Ok(clean)
+}
+
+/// Whether the project's git ignores the plan folder: `{ "ignored": true | false | null }`.
+/// Null when the project is not a git repo or the folder is not a valid plan folder.
+#[tauri::command]
+pub async fn plan_folder_status(
+    state: State<'_, AppState>,
+    project_id: String,
+    folder: String,
+) -> Res<Value> {
+    let p = project(&state, &project_id)?;
+    let (Some(git), Some(f)) = (state.git.clone(), agent::clean_plans_folder(&folder)) else {
+        return Ok(json!({ "ignored": null }));
+    };
+    let ignored = crate::plan_folder::ignored(&git, &p.root, &f).await;
+    Ok(json!({ "ignored": ignored, "line": crate::plan_folder::gitignore_line(&f) }))
+}
+
+/// "Add to .gitignore" in Settings: adds the plan folder to the project's `.gitignore`. Runs
+/// only on that click; FocusIDE never edits `.gitignore` by itself.
+#[tauri::command]
+pub fn plan_folder_gitignore(
+    state: State<'_, AppState>,
+    project_id: String,
+    folder: String,
+) -> Res<()> {
+    let p = project(&state, &project_id)?;
+    let f = agent::clean_plans_folder(&folder).ok_or("outside")?;
+    crate::plan_folder::add_to_gitignore(&p.root, &f).map_err(|e| format!("{e:#}"))
+}
+
+/// Saved data of one session (plan versions, prompts and answers), or null. See session_data.rs.
+#[tauri::command]
+pub fn session_data_load(state: State<'_, AppState>, project_id: String, id: String) -> Res<Value> {
+    let p = project(&state, &project_id)?;
+    Ok(crate::session_data::load(&p.data_dir, &id))
+}
+
+#[tauri::command]
+pub fn session_data_save(
+    state: State<'_, AppState>,
+    project_id: String,
+    id: String,
+    value: Value,
+) -> Res<()> {
+    let p = project(&state, &project_id)?;
+    crate::session_data::save(&p.data_dir, &id, &value).map_err(|e| format!("{e:#}"))
 }
 
 /// How the user's Claude Code is signed in, as a route: chat (API key or cloud provider) or
