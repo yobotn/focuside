@@ -8,7 +8,7 @@
   import { t } from "../i18n";
   import { keyLabel } from "../platform";
   import { app, type Project } from "../stores/app.svelte";
-  import { decode, newTerminal } from "../xterm";
+  import { decode, newTerminal, rightClickPaste } from "../xterm";
   import { dock } from "../stores/dock.svelte";
   import DockGrip from "./DockGrip.svelte";
 
@@ -24,6 +24,7 @@
   let exited = $state(false);
   let unlisten: UnlistenFn[] = [];
   let ro: ResizeObserver | null = null;
+  let offMenu: (() => void) | null = null;
 
   async function start() {
     if (!term || !fit) return;
@@ -52,6 +53,8 @@
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host!);
+    // Right click copies the selection or pastes; Ctrl+V and Ctrl+C work as in Windows Terminal (xterm.ts).
+    offMenu = rightClickPaste(term, host!);
     term.onData((data) => {
       if (exited) {
         if (data === "\r") start();
@@ -93,6 +96,7 @@
   onDestroy(() => {
     unlisten.forEach((f) => f());
     ro?.disconnect();
+    offMenu?.();
     if (id) invoke("pty_close", { id }).catch(() => {});
     term?.dispose();
   });

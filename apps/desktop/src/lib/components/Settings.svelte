@@ -1,9 +1,11 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { api, type HooksInfo } from "../api";
   import { t } from "../i18n";
   import { agentNote, app, type SessionTabs } from "../stores/app.svelte";
+  import { relTo } from "../stores/session.svelte";
   import { applyTheme, type Theme } from "../theme.svelte";
   import { reportIssue, updates } from "../updates.svelte";
 
@@ -39,6 +41,47 @@
   $effect(() => {
     invoke<string>("default_shell_name").then((s) => (shellName = s)).catch(() => {});
   });
+
+  // Plan folder: Claude's default, a folder in the project, or one the user picks inside it.
+  const SUGGESTED = "plans";
+  let planError = $state("");
+  let gitStatus = $state<{ ignored: boolean | null; line?: string } | null>(null);
+  const planChoice = $derived(app.settings.planFolder);
+  $effect(() => {
+    const folder = app.settings.planFolder;
+    const project = app.active;
+    gitStatus = null;
+    if (!folder || !project) return;
+    api.planFolderStatus(project.id, folder).then((st) => {
+      if (app.settings.planFolder === folder) gitStatus = st;
+    }).catch(() => {});
+  });
+
+  async function setPlanFolder(value: string) {
+    planError = "";
+    if (value !== "__pick") {
+      if (!(await app.setPlanFolder(value))) planError = t("planFolder.outside");
+      return;
+    }
+    const project = app.active;
+    if (!project) return;
+    const picked = await openDialog({ directory: true, multiple: false, defaultPath: project.root }).catch(() => null);
+    if (typeof picked !== "string") return;
+    const rel = relTo(project.root, picked);
+    if (!rel || !(await app.setPlanFolder(rel))) planError = t("planFolder.outside");
+  }
+
+  async function addToGitignore() {
+    const project = app.active;
+    const folder = app.settings.planFolder;
+    if (!project || !folder) return;
+    try {
+      await api.planFolderGitignore(project.id, folder);
+      gitStatus = await api.planFolderStatus(project.id, folder);
+    } catch (e) {
+      planError = String(e);
+    }
+  }
 
   function setTheme(v: Theme) {
     app.settings.theme = v;
@@ -132,6 +175,30 @@
         <option value="top">{t("settings.sessionTabs.top")}</option>
         <option value="side">{t("settings.sessionTabs.side")}</option>
       </select>
+
+      <label for="s-plans">{t("planFolder.label")}</label>
+      <select id="s-plans" value={planChoice} onchange={(e) => {
+          const v = e.currentTarget.value;
+          // The select shows the saved folder until the change is applied.
+          e.currentTarget.value = app.settings.planFolder;
+          setPlanFolder(v);
+        }}>
+        <option value="">{t("planFolder.default")}</option>
+        <option value={SUGGESTED}>{t("planFolder.project", { folder: SUGGESTED })}</option>
+        {#if planChoice && planChoice !== SUGGESTED}<option value={planChoice}>{t("planFolder.project", { folder: planChoice })}</option>{/if}
+        <option value="__pick" disabled={!app.active}>{t("planFolder.pick")}</option>
+      </select>
+      {#if planError}
+        <p class="note text-warn" role="alert">{planError}</p>
+      {:else if planChoice}
+        <p class="note text-fg-muted">{t("planFolder.hint")}</p>
+        {#if gitStatus?.ignored === false}
+          <p class="note gitline">
+            <span class="text-fg-muted">{t("planFolder.notIgnored", { folder: planChoice })}</span>
+            <button class="btn h-6" onclick={addToGitignore}>{t("planFolder.gitignore")}</button>
+          </p>
+        {/if}
+      {/if}
 
       <label for="s-ignored">{t("settings.ignored")}</label>
       <input
@@ -292,6 +359,11 @@
   .note {
     grid-column: 1 / -1;
     margin-top: -4px;
+  }
+  .gitline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .rows {
     display: grid;

@@ -20,6 +20,7 @@ import { en } from "../i18n/en";
 import type { Entry, ProjectInfo, UndoOutcome, Waiting } from "../types";
 import { Session, type SavedSession, type SessionMode } from "./session.svelte";
 import { paneTerms } from "./paneterm.svelte";
+import { MODE_SWITCH_PRESSES, MODE_SWITCH_WAIT, titleTopic } from "../tui";
 import { applyTheme, type Theme } from "../theme.svelte";
 import { DEFAULT_BOTTOM, defaultDock, legacyDock, normalizeDock, type Dock } from "../dock";
 import { updates } from "../updates.svelte";
@@ -46,6 +47,10 @@ export interface Settings {
   sessionTabs: SessionTabs;
   /** Agent ids whose chat mode the user confirmed once after a terms note (see CHAT_CONFIRM). */
   chatConfirmed: string[];
+  /** Settings > Plan folder: "" for Claude's default (~/.claude/plans), else a folder relative
+   * to the project root. Claude panes FocusIDE starts get it as `plansDirectory`; snapshots
+   * skip it. */
+  planFolder: string;
 }
 
 /** Agents that open in a pane by default and ask once before chat mode. Antigravity: Google's
@@ -111,7 +116,7 @@ const defaults: Persisted = {
   sessions: {},
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [] },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [], planFolder: "" },
   filesVisible: true,
   layout: defaultLayout(),
 };
@@ -147,6 +152,13 @@ class AppStore {
   terminalVisible = $state(false);
   /** The Plan panel. Opens when a plan arrives; not kept between runs. */
   planVisible = $state(false);
+  /** The Prompts panel (PromptsPanel.svelte). The dock shows it while this is true. */
+  promptsVisible = $state(false);
+  /** The prompt the Prompts panel opens and scrolls to (a click on a dot of the pane strip). */
+  promptsFocus = $state<{ sessionKey: string; id: string | null; seq: number } | null>(null);
+  /** The newest request to show a panel, for the dock: showPlan() and showPrompts() set it. */
+  panelRequest = $state<{ panel: "plan" | "prompts"; seq: number } | null>(null);
+  private panelSeq = 0;
   terminalCommand = $state<string | null>(null);
   focused = $state(true);
   toast = $state<{ text: string; tone: "muted" | "error" } | null>(null);
@@ -165,6 +177,7 @@ class AppStore {
 
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionsByKey = new Map<string, Session>();
+  private dataTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   get active(): Project | undefined {
     return this.projects.find((p) => p.id === this.activeId);
@@ -206,6 +219,10 @@ class AppStore {
       if (typeof this.settings.claudeHooks !== "boolean") this.settings.claudeHooks = true;
       if (typeof this.settings.claudeBrief !== "boolean") this.settings.claudeBrief = false;
       if (this.settings.sessionTabs !== "side") this.settings.sessionTabs = "top";
+      if (typeof this.settings.planFolder !== "string") this.settings.planFolder = "";
+      // Snapshots skip the plan folder. A folder Rust refuses counts as Claude's default.
+      if (this.settings.planFolder)
+        await api.planFolderSet(this.settings.planFolder).catch(() => (this.settings.planFolder = ""));
       this.filesVisible = st.filesVisible;
       this.layout = loadLayout(raw?.layout as Record<string, unknown> | undefined);
       applyTheme(this.settings.theme);
@@ -448,9 +465,10 @@ class AppStore {
       const hooks = claudePane && this.settings.claudeHooks;
       const planFirst = claudePane && this.planFirst;
       const brief = hooks && this.settings.claudeBrief;
+      const planFolder = claudePane && this.settings.planFolder ? this.settings.planFolder : null;
       const key =
         m === "pane"
-          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane", hooks, planFirst, brief)
+          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane", hooks, planFirst, brief, planFolder)
           : await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
       const s = new Session(key, p.id, p.root, resume);
       s.agent = agent;
@@ -461,7 +479,16 @@ class AppStore {
       if (m === "pane" && !resume) {
         // A pane has no ACP session id. FocusIDE's own id lets the sessions list reopen it.
         s.acpId = `pane-${key}`;
-        s.name = t("pane.name", { agent: this.agentName(agent) });
+      }
+      if (!resume) {
+        // A generic name until a prompt or the agent's title names the session.
+        s.name = this.nextSessionName(p);
+        s.generic = true;
+      }
+      s.onData = () => this.saveSessionData(s);
+      if (resume) {
+        const data = await api.sessionDataLoad(p.id, resume.acpId).catch(() => null);
+        s.loadData(data);
       }
       this.sessionsByKey.set(key, s);
       p.sessions.push(s);
@@ -483,6 +510,75 @@ class AppStore {
         this.env = await api.envCheck();
       }
       else this.flash(msg, "error");
+    }
+  }
+
+  /** "Session N": the lowest number no open session of the project uses. */
+  private nextSessionName(p: Project): string {
+    const used = new Set(p.sessions.map((s) => s.name));
+    let n = p.sessions.length + 1;
+    for (let i = 1; i <= n; i++) {
+      if (!used.has(t("session.numbered", { n: i }))) {
+        n = i;
+        break;
+      }
+    }
+    return t("session.numbered", { n });
+  }
+
+  /** Saves a session's plan versions and prompts to app data, shortly after they change. */
+  private saveSessionData(s: Session) {
+    const old = this.dataTimers.get(s.key);
+    if (old) clearTimeout(old);
+    this.dataTimers.set(
+      s.key,
+      setTimeout(() => {
+        this.dataTimers.delete(s.key);
+        const data = s.data();
+        if (s.acpId && data) api.sessionDataSave(s.projectId, s.acpId, data).catch(() => {});
+      }, 500),
+    );
+  }
+
+  /** A terminal title from a pane's TUI (OSC 0 or 2). A topic becomes the tab name unless the
+   * user renamed the session. Titles that are not a topic (a program path, the agent's name)
+   * are ignored without a message. */
+  paneTitle(s: Session, raw: string) {
+    const topic = titleTopic(raw, [this.agentName(s.agent), s.agent]);
+    if (topic && s.setTitle(topic)) {
+      this.updateTitle();
+      this.save();
+    }
+  }
+
+  /** Shows the Plan panel and brings it to the front of its dock group. */
+  showPlan() {
+    this.planVisible = true;
+    this.panelRequest = { panel: "plan", seq: ++this.panelSeq };
+    import("./dock.svelte").then(({ dock }) => dock.open("plan")).catch(() => {});
+  }
+
+  /** Shows the Prompts panel, opened at one prompt when `id` is given. The dock shows the panel
+   * while `promptsVisible` is true (panel id "prompts"). */
+  showPrompts(sessionKey: string, id: string | null = null) {
+    this.promptsVisible = true;
+    const seq = ++this.panelSeq;
+    this.promptsFocus = { sessionKey, id, seq };
+    this.panelRequest = { panel: "prompts", seq };
+    import("./dock.svelte")
+      .then(({ dock }) => (dock.open as (p: string) => void)("prompts"))
+      .catch(() => {});
+  }
+
+  /** Settings > Plan folder. "" is Claude's default. Returns false for a folder outside the project. */
+  async setPlanFolder(folder: string): Promise<boolean> {
+    try {
+      const clean = await api.planFolderSet(folder.trim() || null);
+      this.settings.planFolder = clean ?? "";
+      this.save();
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -556,6 +652,15 @@ class AppStore {
     const p = this.projects.find((x) => x.sessions.some((s) => s.key === key));
     if (!p) return;
     this.saveNow();
+    const closing = this.sessionsByKey.get(key);
+    const pending = this.dataTimers.get(key);
+    if (closing && pending) {
+      // Write the plan versions and prompts now, not after the session is gone.
+      clearTimeout(pending);
+      this.dataTimers.delete(key);
+      const data = closing.data();
+      if (closing.acpId && data) await api.sessionDataSave(closing.projectId, closing.acpId, data).catch(() => {});
+    }
     await api.sessionClose(key).catch(() => {});
     paneTerms.dispose(key);
     p.sessions = p.sessions.filter((s) => s.key !== key);
@@ -591,7 +696,14 @@ class AppStore {
     if (e.kind === "claude_route") this.claudeRoute = { access: e.access, route: e.route };
     const s = this.sessionFor(e.key);
     if (!s) return;
+    // A prompt that was not tracked: name the session that held the project.
+    if (e.kind === "turn_untracked" && typeof e.holder === "string") e.holderName = this.sessionFor(e.holder)?.name ?? "";
+    const versions = s.planVersions.length;
+    const named = s.name;
     const w = s.handle(e);
+    // A new plan version opens the Plan panel at that version.
+    if (s.planVersions.length > versions && !s.replaying && this.session === s) this.showPlan();
+    if (s.name !== named) this.save();
     if (e.kind === "ready") {
       s.replaying = false;
       this.save();
@@ -711,9 +823,19 @@ class AppStore {
     return !!p?.sessions.some((x) => x.key !== s.key && x.claims);
   }
 
-  askUndo(s: Session, entry: Extract<Entry, { t: "plan" }> | Extract<Entry, { t: "changes" }>) {
+  /** Opens the undo dialog for a turn: a plan or changes entry, or a prompt of the Prompts panel. */
+  askUndo(s: Session, entry: { id: string; turnId: string | null }) {
     if (!entry.turnId) return;
     this.undoTarget = { projectId: s.projectId, turnId: entry.turnId, entryId: entry.id, sessionKey: s.key };
+  }
+
+  /** Sets the undo state of every entry and prompt of a turn. */
+  private markUndo(target: { sessionKey: string; turnId: string }, undo: { outcome: UndoOutcome } | null) {
+    const s = this.sessionFor(target.sessionKey);
+    if (!s) return;
+    for (const e of s.entries) if ((e.t === "plan" || e.t === "changes") && e.turnId === target.turnId) e.undo = undo;
+    for (const p of s.prompts) if (p.turnId === target.turnId) p.undo = undo;
+    if (s.prompts.some((p) => p.turnId === target.turnId)) this.saveSessionData(s);
   }
 
   entryOf(target: { entryId: string; sessionKey: string }) {
@@ -725,6 +847,7 @@ class AppStore {
   applyUndo(target: { entryId: string; sessionKey: string; projectId: string; turnId: string }, outcome: UndoOutcome) {
     const { e } = this.entryOf(target);
     if (e && (e.t === "plan" || e.t === "changes")) e.undo = { outcome };
+    this.markUndo(target, { outcome });
     this.lastUndo = target;
     // Chat sessions tell the agent in the next prompt. A pane gets nothing typed in, so the
     // user is told instead.
@@ -732,16 +855,39 @@ class AppStore {
     if (s?.mode === "pane") s.note(t("pane.undoNote", { agent: this.agentName(s.agent) }), "warn");
   }
 
-  /** The mode button of a Claude pane: one Shift+Tab key sequence, sent only on this click and
-   * only while no prompt runs. Claude moves to its next permission mode; the shown mode
-   * follows the TUI's status line and hook events. */
-  async paneModeKey(s: Session) {
-    if (s.mode !== "pane" || s.agent !== "claude") return;
+  /**
+   * The plan mode switch of a Claude pane: turns plan mode on or off. Claude has one key for
+   * modes (Shift+Tab moves to the next one), so the switch presses it, waits for the status
+   * line to change, reads the mode again, and stops at the target (at most
+   * MODE_SWITCH_PRESSES presses). On: plan mode. Off: the mode before plan mode, else manual.
+   * Keys go only on this click and only while no prompt runs (pane.rs refuses them otherwise).
+   * When the mode cannot be read, nothing is sent.
+   */
+  async togglePlanMode(s: Session) {
+    if (s.mode !== "pane" || s.agent !== "claude" || s.modeSwitching) return;
+    const term = paneTerms.find(s.key);
+    let mode = term?.shownMode() ?? null;
+    if (!term || !mode) return;
+    const on = mode !== "plan";
+    if (on) s.modeBeforePlan = mode;
+    const target = on ? "plan" : s.modeBeforePlan && s.modeBeforePlan !== "plan" ? s.modeBeforePlan : "default";
+    s.modeSwitching = true;
     try {
-      await api.paneModeKey(s.key);
+      for (let i = 0; i < MODE_SWITCH_PRESSES && mode !== target; i++) {
+        await api.paneModeKey(s.key);
+        const next = await term.waitForMode(mode, MODE_SWITCH_WAIT);
+        if (!next) break;
+        mode = next;
+        // Turning off: any mode that is not plan is better than another round of the cycle.
+        if (!on && mode !== "plan" && i === MODE_SWITCH_PRESSES - 1) break;
+      }
     } catch (e) {
       const msg = errText(e);
       this.flash(msg === "busy" ? t("pane.modeBusy") : msg === "closed" ? t("pane.exitedShort") : msg, "error");
+    } finally {
+      s.modeSwitching = false;
+      s.screenMode = term.shownMode();
+      term.focus();
     }
   }
 
@@ -762,6 +908,7 @@ class AppStore {
       const out = await api.redo(target.projectId, target.turnId);
       const { e } = this.entryOf(target);
       if (e && (e.t === "plan" || e.t === "changes")) e.undo = null;
+      this.markUndo(target, null);
       this.lastUndo = null;
       this.flash(out.exact ? t("undo.redone") : t("changes.undonePartial"));
     } catch (e) {

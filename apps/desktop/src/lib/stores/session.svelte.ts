@@ -9,6 +9,8 @@ import type {
   OutOfPlan,
   ParsedPlan,
   PermissionOption,
+  PlanVersion,
+  PromptTurn,
   TurnResult,
   Waiting,
 } from "../types";
@@ -67,7 +69,22 @@ export interface SavedSession {
   agent?: string;
   /** "pane" for the agent's own TUI. Missing means chat. For a pane, `acpId` is FocusIDE's own id. */
   mode?: SessionMode;
+  /** The name came from the agent (a terminal title or an ACP session title). */
+  titled?: boolean;
+  /** The name is still "Session N". */
+  generic?: boolean;
 }
+
+/** What a session keeps in app data between runs (session_data.rs). */
+export interface SessionData {
+  v: 1;
+  planVersions: PlanVersion[];
+  /** Pane prompts. Chat prompts come from the conversation. */
+  prompts: PromptTurn[];
+}
+
+const MAX_VERSIONS = 100;
+const MAX_PROMPTS = 500;
 
 /** Chat: FocusIDE's own UI over ACP. Pane: the agent's own TUI in a terminal in the center. */
 export type SessionMode = "chat" | "pane";
@@ -106,10 +123,31 @@ export class Session {
   /** Pane (Claude): the permission mode, from the last hook event or the TUI's status line.
    * Null when unknown. */
   paneMode = $state<string | null>(null);
+  /** Pane (Claude): the mode the TUI's status line shows now. Null when it cannot be read; the
+   * plan mode switch is then off. */
+  screenMode = $state<string | null>(null);
+  /** The plan mode switch is pressing keys. */
+  modeSwitching = $state(false);
+  /** The mode before the switch turned plan mode on; turning it off goes back to it. */
+  modeBeforePlan: string | null = null;
+  /** Plan history: every plan and todo list version (kept in app data). */
+  planVersions = $state<PlanVersion[]>([]);
+  /** Pane prompts with their answers (kept in app data). */
+  prompts = $state<PromptTurn[]>([]);
+  /** Pane: the name of the session that held the project when the last prompt was not tracked. */
+  untrackedBy = $state<string | null>(null);
+  /** Called when the data in `data()` changed, so the app can save it. */
+  onData: (() => void) | null = null;
   /** Pane: the agent's todo list (TodoWrite or the Task tools, from hooks). */
   paneTodos = $state<{ content: string; status: string }[]>([]);
   name = $state("");
+  /** The user named the session (rename). Then nothing else replaces the name. */
   renamed = $state(false);
+  /** The name came from the agent (terminal title or ACP session title). */
+  titled = $state(false);
+  /** The name is still the placeholder "Session N". */
+  generic = $state(false);
+  private fromSaved = false;
   status = $state<Status>("idle");
   error = $state<string | null>(null);
   entries = $state<Entry[]>([]);
@@ -146,7 +184,103 @@ export class Session {
       this.updated = saved.updated;
       this.agent = saved.agent ?? "claude";
       this.mode = saved.mode ?? "chat";
+      this.titled = !!saved.titled;
+      this.generic = !!saved.generic;
+      this.fromSaved = true;
     }
+  }
+
+  /** A new name from a prompt: only while no title came from the agent and the user did not
+   * rename the session. */
+  private nameFromPrompt(text: string) {
+    if (this.renamed || this.titled || !text.trim()) return;
+    this.name = nameFrom(text);
+    this.generic = false;
+  }
+
+  /** A topic from the agent (terminal title or ACP title). Never replaces the user's name. */
+  setTitle(topic: string): boolean {
+    if (this.renamed || !topic || topic === this.name) return false;
+    this.name = topic;
+    this.titled = true;
+    this.generic = false;
+    return true;
+  }
+
+  /** The data kept in app data, or null when there is nothing to keep. */
+  data(): SessionData | null {
+    if (!this.planVersions.length && !this.prompts.length) return null;
+    return { v: 1, planVersions: $state.snapshot(this.planVersions), prompts: $state.snapshot(this.prompts) };
+  }
+
+  /** Data saved in an earlier run. Unknown shapes are ignored. */
+  loadData(d: unknown) {
+    const v = d as Partial<SessionData> | null;
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v.planVersions) && !this.planVersions.length) this.planVersions = v.planVersions.slice(-MAX_VERSIONS);
+    if (Array.isArray(v.prompts) && !this.prompts.length) this.prompts = v.prompts.slice(-MAX_PROMPTS);
+  }
+
+  private changed() {
+    this.onData?.();
+  }
+
+  /** Adds a plan version unless it is the same text as the newest plan. Returns true for a
+   * new version. */
+  addPlanVersion(text: string, approved: boolean | null, turnId: string | null): boolean {
+    if (!text.trim()) return false;
+    const last = this.planVersions.findLast((x) => x.source === "plan");
+    if (last && last.text === text) {
+      if (approved && !last.approved) {
+        last.approved = true;
+        this.changed();
+      }
+      return false;
+    }
+    this.pushVersion({ n: 0, at: Date.now(), source: "plan", text, approved, turnId });
+    return true;
+  }
+
+  /** A todo list: a new version when its items changed, else the statuses update in place. */
+  addTodoVersion(todos: { content: string; status: string }[]): boolean {
+    if (!todos.length) return false;
+    const text = todos.map((x) => `- ${x.content}`).join("\n");
+    const last = this.planVersions.findLast((x) => x.source === "todos");
+    if (last && last.text === text) {
+      last.todos = todos.map((x) => ({ ...x }));
+      this.changed();
+      return false;
+    }
+    this.pushVersion({ n: 0, at: Date.now(), source: "todos", text, approved: null, turnId: this.turnId, todos: todos.map((x) => ({ ...x })) });
+    return true;
+  }
+
+  private pushVersion(v: PlanVersion) {
+    v.n = (this.planVersions[this.planVersions.length - 1]?.n ?? 0) + 1;
+    this.planVersions.push(v);
+    if (this.planVersions.length > MAX_VERSIONS) this.planVersions.splice(0, this.planVersions.length - MAX_VERSIONS);
+    this.changed();
+  }
+
+  /** The prompts for the Prompts panel, oldest first. Panes: from hooks. Chat: from the
+   * conversation (each user message with the agent text and the changes after it). */
+  get promptList(): PromptTurn[] {
+    if (this.mode === "pane") return this.prompts;
+    const out: PromptTurn[] = [];
+    let cur: PromptTurn | null = null;
+    for (const e of this.entries) {
+      if (e.t === "user") {
+        cur = { id: e.id, at: e.at ?? null, prompt: e.text, answer: null, turnId: null, result: null, undo: null };
+        out.push(cur);
+      } else if (!cur) continue;
+      else if (e.t === "agent") cur.answer = (cur.answer ? cur.answer + "\n\n" : "") + e.text;
+      else if ((e.t === "plan" || e.t === "changes") && e.result) {
+        cur.turnId = e.turnId;
+        cur.result = e.result;
+        cur.undo = e.undo;
+      }
+    }
+    return out;
   }
 
   get model(): ConfigOption | undefined {
@@ -188,6 +322,7 @@ export class Session {
   saved(): SavedSession | null {
     // Sessions nobody used are not worth listing.
     if (!this.acpId || !this.name) return null;
+    if (this.generic && !this.fromSaved && !this.renamed) return null;
     return {
       acpId: this.acpId,
       name: this.name,
@@ -196,12 +331,14 @@ export class Session {
       updated: this.updated,
       agent: this.agent,
       mode: this.mode,
+      titled: this.titled,
+      generic: this.generic,
     };
   }
 
   addUser(text: string, images = 0, files: string[] = []) {
-    this.entries.push({ t: "user", id: nid(), text, images, files });
-    if (!this.name) this.name = nameFrom(text);
+    this.entries.push({ t: "user", id: nid(), text, images, files, at: Date.now() });
+    this.nameFromPrompt(text);
     this.updated = Date.now();
   }
 
@@ -237,6 +374,13 @@ export class Session {
     if (last && last.t === "user") last.text += text;
     else this.entries.push({ t: "user", id: nid(), text });
     if (!this.name) this.name = nameFrom(text);
+  }
+
+  /** Called with the newest plan or todo list of a chat turn. */
+  private chatVersion(kind: "plan" | "todos", value: string | { content: string; status: string }[]) {
+    if (this.replaying) return;
+    if (kind === "plan" && typeof value === "string") this.addPlanVersion(value, null, this.turnId);
+    else if (Array.isArray(value)) this.addTodoVersion(value);
   }
 
   /** Applies one event. Returns what changed for the app (waiting and notifications). */
@@ -380,6 +524,7 @@ export class Session {
       }
       case "plan":
         this.todo = (u.entries ?? []).map((x: any) => ({ content: x.content, status: x.status }));
+        this.chatVersion("todos", this.todo);
         break;
       case "available_commands_update":
         this.commands = u.availableCommands ?? [];
@@ -391,7 +536,7 @@ export class Session {
         if (typeof u.used === "number" && typeof u.size === "number") this.usage = { used: u.used, size: u.size };
         break;
       case "session_info_update":
-        if (u.title && !this.renamed) this.name = u.title;
+        if (typeof u.title === "string") this.setTitle(u.title.trim());
         break;
     }
   }
@@ -450,6 +595,7 @@ export class Session {
         card.text = e.planText ?? "";
         card.plan = plan;
         card.state = "waiting";
+        this.chatVersion("plan", card.text);
       }
       this.waiting = "plan";
       return "plan";
@@ -563,17 +709,32 @@ export class Session {
       case "pane_working":
         this.paneWorking = true;
         break;
-      case "pane_idle":
+      case "pane_idle": {
         this.paneWorking = false;
         if (this.tracking !== "error") this.tracking = "waiting";
         this.turnId = null;
+        const last = this.prompts[this.prompts.length - 1];
+        if (last && typeof e.lastMessage === "string" && last.answer === null) {
+          last.answer = e.lastMessage;
+          this.changed();
+        }
         break;
+      }
       case "pane_mode":
         if (typeof e.mode === "string") this.paneMode = e.mode;
         break;
       case "pane_todos":
         this.paneTodos = Array.isArray(e.todos) ? e.todos : [];
+        this.addTodoVersion(this.paneTodos);
         break;
+      case "pane_prompt": {
+        const text = typeof e.text === "string" ? e.text : "";
+        this.prompts.push({ id: nid(), at: Date.now(), prompt: text, answer: null, turnId: null, result: null, undo: null });
+        if (this.prompts.length > MAX_PROMPTS) this.prompts.splice(0, this.prompts.length - MAX_PROMPTS);
+        this.nameFromPrompt(text);
+        this.changed();
+        break;
+      }
       case "pane_plan": {
         const plan: ParsedPlan = e.plan;
         const turnId: string | null = e.turnId ?? null;
@@ -585,19 +746,37 @@ export class Session {
         } else {
           this.entries.push({ t: "panePlan", id: nid(), turnId, text: e.planText ?? "", plan, approved: !!e.approved });
         }
+        this.addPlanVersion(e.planText ?? "", !!e.approved, turnId);
         break;
       }
-      case "turn_started":
+      case "turn_started": {
         this.tracking = "on";
         this.trackingError = null;
+        this.untrackedBy = null;
         this.turnId = e.turnId;
+        const last = this.prompts[this.prompts.length - 1];
+        if (last && !last.turnId) {
+          last.turnId = e.turnId;
+          this.changed();
+        }
         break;
-      case "turn_untracked":
+      }
+      case "turn_untracked": {
         this.tracking = e.reason === "otherRunning" ? "otherRunning" : "error";
         this.trackingError = e.error ?? null;
-        // The status changes again at the next Stop, so the plan panel keeps a note.
-        if (e.reason === "otherRunning") this.note(t("pane.notTrackedHook"), "warn");
+        if (e.reason !== "otherRunning") break;
+        // The app adds the other session's name (holderName). The status changes again at the
+        // next Stop, so the plan panel keeps a note.
+        const by: string = typeof e.holderName === "string" ? e.holderName : "";
+        this.untrackedBy = by;
+        this.note(untrackedText(by), "warn");
+        const last = this.prompts[this.prompts.length - 1];
+        if (last && !last.turnId) {
+          last.untracked = by;
+          this.changed();
+        }
         break;
+      }
       case "turn_ended": {
         const r = e as unknown as TurnResult;
         this.tracking = "off";
@@ -605,6 +784,11 @@ export class Session {
         this.updated = Date.now();
         if (r.hasSnapshot && (r.changes?.files.length || r.changes?.generated.length)) {
           this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
+        }
+        const turn = this.prompts.findLast((x) => x.turnId === r.turnId);
+        if (turn) {
+          turn.result = $state.snapshot(r) as TurnResult;
+          this.changed();
         }
         if (r.failure != null) this.note(r.failure ? t("pane.stopFailure", { error: r.failure }) : t("pane.stopFailureUnknown"), "warn");
         if (r.snapshotError) this.note(t("changes.snapshotFailed", { error: r.snapshotError }), "error");
@@ -621,6 +805,11 @@ export class Session {
     if (planned.has(path.toLowerCase())) return null;
     return outside.find((o) => o.path === path)?.reason ?? "";
   }
+}
+
+/** The note for a prompt that was not tracked because another session held the project. */
+export function untrackedText(by: string): string {
+  return by ? t("pane.notTracked", { name: by }) : t("pane.notTrackedOther");
 }
 
 /** Session name from the first prompt: the first line, short. */

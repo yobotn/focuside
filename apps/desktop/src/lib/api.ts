@@ -46,7 +46,8 @@ export const api = {
   agentList: () => invoke<AgentInfo[]>("agent_list"),
   adapterDownload: () => invoke<string>("adapter_download"),
   /** `hooks`: turn tracking in Claude panes (the focuside plugin). `planFirst`: a Claude pane starts in plan mode.
-   * `brief`: the plugin copy with the brief replies output style (needs `hooks`). */
+   * `brief`: the plugin copy with the brief replies output style (needs `hooks`). `planFolder`: Settings > Plan
+   * folder, a folder in the project for Claude's plan files (null: Claude's default folder). */
   sessionStart: (
     projectId: string,
     resume: string | null,
@@ -56,7 +57,18 @@ export const api = {
     hooks = false,
     planFirst = false,
     brief = false,
-  ) => invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode, hooks, planFirst, brief }),
+    planFolder: string | null = null,
+  ) => invoke<string>("session_start", { projectId, resume, agentId, customCommand, mode, hooks, planFirst, brief, planFolder }),
+  /** Settings > Plan folder. Snapshots skip the folder. Rejects with "outside" for a folder outside the project. */
+  planFolderSet: (folder: string | null) => invoke<string | null>("plan_folder_set", { folder }),
+  /** Whether the project's git ignores the plan folder. `ignored` is null when the project is not a git repo. */
+  planFolderStatus: (projectId: string, folder: string) =>
+    invoke<{ ignored: boolean | null; line?: string }>("plan_folder_status", { projectId, folder }),
+  /** "Add to .gitignore": only on the user's click. */
+  planFolderGitignore: (projectId: string, folder: string) => invoke<void>("plan_folder_gitignore", { projectId, folder }),
+  /** Plan versions and prompts of one session, kept in app data. */
+  sessionDataLoad: (projectId: string, id: string) => invoke<unknown>("session_data_load", { projectId, id }),
+  sessionDataSave: (projectId: string, id: string, value: unknown) => invoke<void>("session_data_save", { projectId, id, value }),
   hooksInfo: () => invoke<HooksInfo>("hooks_info"),
   /** Sends one Shift+Tab key sequence to a Claude pane (its mode button). Rejects with "busy" while a prompt runs. */
   paneModeKey: (key: string) => invoke<void>("pane_mode_key", { key }),

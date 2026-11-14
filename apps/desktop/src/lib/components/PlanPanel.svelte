@@ -1,6 +1,10 @@
 <script lang="ts">
   // The plan panel. It shows, for one session (the active one unless `sessionKey` is given):
-  // - the newest plan (a pane: ExitPlanMode from hooks; chat: the plan card text),
+  // - the plan history (`Session.planVersions`, kept in app data): every plan (a pane:
+  //   ExitPlanMode from hooks; chat: the plan card text) and every todo list whose items
+  //   changed. A new version opens at the newest version with its changes against the version
+  //   before marked (added lines highlighted, removed lines struck through; "Show changes"
+  //   turns it off). A compact selector picks an older version,
   // - the todo list (a pane: TodoWrite or the Task tools from hooks; chat: the agent's plan
   //   updates) with a mark for each status,
   // - one line per turn ("3 files changed") with Undo. The file list opens on click.
@@ -8,9 +12,10 @@
   // place it anywhere (a dock tab next to the file viewer by default).
   import { CaretRight, CheckCircle, Circle, CircleHalf } from "phosphor-svelte";
   import { t } from "../i18n";
+  import { diffLines } from "../linediff";
   import { app } from "../stores/app.svelte";
   import type { Session } from "../stores/session.svelte";
-  import type { Entry, TurnResult, UndoState } from "../types";
+  import type { Entry, PlanVersion, TurnResult, UndoState } from "../types";
   import FileIcon from "./FileIcon.svelte";
   import Markdown from "./Markdown.svelte";
 
@@ -18,8 +23,35 @@
 
   const session = $derived<Session | undefined>(sessionKey ? app.sessionFor(sessionKey) : app.session);
   const plan = $derived(session?.latestPlan ?? null);
-  const todos = $derived(session?.todos ?? []);
+  const versions = $derived(session?.planVersions ?? []);
+  /** The version the user picked; null follows the newest. */
+  let picked = $state<number | null>(null);
+  let showChanges = $state(true);
+  let seenKey: string | undefined;
+  let seenLen = 0;
+  // A new version, or another session: back to the newest version with its changes shown.
+  $effect(() => {
+    const key = session?.key;
+    const n = versions.length;
+    if (key !== seenKey || n > seenLen) {
+      picked = null;
+      showChanges = true;
+    }
+    seenKey = key;
+    seenLen = n;
+  });
+  const current = $derived<PlanVersion | null>(versions.find((v) => v.n === picked) ?? versions[versions.length - 1] ?? null);
+  const previous = $derived(current ? versions.findLast((v) => v.source === current.source && v.n < current.n) : undefined);
+  const diff = $derived(current && previous && showChanges ? diffLines(previous.text, current.text) : null);
+  const liveTodos = $derived(session?.todos ?? []);
+  // A todo list version shows its own items; the newest one keeps the live statuses.
+  const todos = $derived(current?.source === "todos" ? (current.todos ?? []) : liveTodos);
   const done = $derived(todos.filter((x) => x.status === "completed").length);
+
+  function versionLabel(v: PlanVersion): string {
+    const time = new Date(v.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return v.source === "todos" ? t("planPanel.versionTodos", { n: v.n, time }) : t("planPanel.version", { n: v.n, time });
+  }
 
   type TurnEntry = Extract<Entry, { t: "changes" }> | Extract<Entry, { t: "plan" }>;
   type Line = { entry: TurnEntry; result: TurnResult; undo: UndoState | null } | { note: Extract<Entry, { t: "note" }> };
@@ -39,7 +71,7 @@
     return out.reverse();
   });
 
-  const empty = $derived(!plan && !todos.length && !lines.length);
+  const empty = $derived(!plan && !versions.length && !todos.length && !lines.length);
   // A pane without hooks has no plan, todos or turns. One quiet line says why.
   const trackingOff = $derived(!!session && session.mode === "pane" && !session.hooksExpected && !session.hooksLive);
 
@@ -63,7 +95,51 @@
       {#if trackingOff}<p class="quiet">{t("pane.trackingOff")}</p>{/if}
     </div>
   {:else}
-    {#if plan}
+    {#if current}
+      <div class="block">
+        <div class="head">
+          <span class="font-semibold">{current.source === "todos" ? t("planPanel.todos") : t("planPanel.title")}</span>
+          {#if current.approved !== null}
+            <span class:text-accent={current.approved} class:text-warn={!current.approved}>
+              {current.approved ? t("pane.planApproved") : t("pane.planProposed")}
+            </span>
+          {/if}
+          <span class="flex-1"></span>
+          {#if versions.length > 1}
+            <select
+              class="versions"
+              aria-label={t("planPanel.versions")}
+              value={String(current.n)}
+              onchange={(e) => {
+                const n = Number(e.currentTarget.value);
+                picked = n === versions[versions.length - 1].n ? null : n;
+              }}
+            >
+              {#each [...versions].reverse() as v (v.n)}<option value={String(v.n)}>{versionLabel(v)}</option>{/each}
+            </select>
+          {/if}
+        </div>
+        {#if previous}
+          <label class="changes-toggle text-fg-muted">
+            <input type="checkbox" bind:checked={showChanges} />
+            {t("planPanel.showChanges", { n: previous.n })}
+          </label>
+        {/if}
+        {#if diff}
+          <div class="diff selectable" role="list" aria-label={t("planPanel.changesSince", { n: previous?.n ?? 0 })}>
+            {#each diff as line, i (i)}
+              <div class="dl {line.kind}" role="listitem">
+                {#if line.kind === "add"}<span class="sr-only">{t("planPanel.added")}</span>{:else if line.kind === "del"}<span class="sr-only">{t("planPanel.removed")}</span>{/if}
+                {line.text || " "}
+              </div>
+            {/each}
+          </div>
+        {:else if current.source === "plan"}
+          <Markdown class="plan-text selectable" text={current.text} />
+        {/if}
+        {#if current.source === "plan" && current.approved === false && !picked}<p class="text-fg-muted">{t("pane.planHint")}</p>{/if}
+      </div>
+    {:else if plan}
       <div class="block">
         <div class="head">
           <span class="font-semibold">{t("planPanel.title")}</span>
@@ -78,10 +154,10 @@
       </div>
     {/if}
 
-    {#if todos.length}
+    {#if todos.length && !(current?.source === "todos" && diff)}
       <div class="block">
         <div class="head">
-          <span class="font-semibold">{t("planPanel.todos")}</span>
+          {#if current?.source !== "todos"}<span class="font-semibold">{t("planPanel.todos")}</span>{/if}
           <span class="ms-auto text-fg-muted">{t("planPanel.todosDone", { done, count: todos.length })}</span>
         </div>
         <ul class="todos selectable">
@@ -279,5 +355,47 @@
   }
   :global(.plan-text) {
     font-size: 13px;
+  }
+  .versions {
+    height: 24px;
+    max-width: 150px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    padding: 0 4px;
+    font: inherit;
+    font-size: 12px;
+  }
+  .changes-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .changes-toggle input {
+    accent-color: var(--accent);
+  }
+  .diff {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 0;
+    overflow-x: auto;
+  }
+  .dl {
+    padding: 0 8px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .dl.add {
+    background: var(--add-bg);
+  }
+  .dl.del {
+    color: var(--fg-muted);
+    text-decoration: line-through;
+    background: var(--del-bg);
   }
 </style>

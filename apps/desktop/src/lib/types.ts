@@ -136,8 +136,39 @@ export interface OutOfPlan {
   reason: string;
 }
 
+/** One version of a session's plan, for the plan panel history. `source` "plan": ExitPlanMode
+ * (pane) or a plan card (chat). "todos": a todo list whose items changed (TodoWrite, the Task
+ * tools or the agent's plan updates); a status change updates the version in place. */
+export interface PlanVersion {
+  n: number;
+  /** Time in ms. */
+  at: number;
+  source: "plan" | "todos";
+  text: string;
+  /** Pane plans: approved in the TUI. Null for chat plans and todo lists. */
+  approved: boolean | null;
+  turnId: string | null;
+  todos?: { content: string; status: string }[];
+}
+
+/** One prompt and its answer, for the Prompts panel. Pane prompts come from hooks
+ * (UserPromptSubmit and Stop) and are kept in app data; chat prompts come from the
+ * conversation. */
+export interface PromptTurn {
+  id: string;
+  /** Time in ms. Null when unknown (a chat history replayed after a resume). */
+  at: number | null;
+  prompt: string;
+  answer: string | null;
+  turnId: string | null;
+  result: TurnResult | null;
+  undo: UndoState | null;
+  /** Not tracked: the name of the session that held the project ("" when unknown). */
+  untracked?: string | null;
+}
+
 export type Entry =
-  | { t: "user"; id: string; text: string; images?: number; files?: string[] }
+  | { t: "user"; id: string; text: string; images?: number; files?: string[]; at?: number }
   | { t: "agent"; id: string; text: string }
   | { t: "tool"; id: string; toolCallId: string; kind: string; title: string; status: string; paths: string[] }
   | {

@@ -4,25 +4,18 @@
 //
 // FocusIDE writes into the agent's PTY only what xterm.js reports as input: the user's keys
 // and paste, and xterm's own answers to terminal queries (cursor position). It never types a
-// prompt or a command into an agent pane. The one exception is the mode button of a Claude
-// pane, which sends one Shift+Tab key sequence on a user click (see pane.rs, `pane_mode_key`).
+// prompt or a command into an agent pane. Two exceptions, both on a user action: the plan
+// mode switch of a Claude pane sends Shift+Tab key sequences on a click (see pane.rs,
+// `pane_mode_key`), and a paste with no text on the clipboard sends the program's image paste
+// key (see tui.ts, `imagePasteKey`).
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { t } from "../i18n";
-import { decode, newTerminal } from "../xterm";
-
-/** Claude Code's status line for each permission mode (permission modes docs, checked live with
- * Claude Code 2.1.x), with the mode names hooks report. The mode glyph comes first. */
-const MODE_LINES: [RegExp, string][] = [
-  [/[\u23f8\u23f5]\s*plan mode on/, "plan"],
-  [/[\u23f8\u23f5]\s*accept edits on/, "acceptEdits"],
-  [/[\u23f8\u23f5]\s*auto mode on/, "auto"],
-  [/[\u23f8\u23f5]\s*manual mode on/, "default"],
-  [/[\u23f8\u23f5]\s*bypass permissions on/, "bypassPermissions"],
-  [/[\u23f8\u23f5]\s*don.t ask on/, "dontAsk"],
-];
+import { isWindows } from "../platform";
+import { CLAUDE_STATUS_ROWS, claudeMode, imagePasteKey } from "../tui";
+import { decode, newTerminal, rightClickPaste } from "../xterm";
 
 export class PaneTerm {
   readonly key: string;
@@ -35,18 +28,25 @@ export class PaneTerm {
   exited = $state(false);
   private opened = false;
   private starting = false;
-  /** Gets the permission mode that the TUI's status line shows (Claude panes). */
-  onMode: ((mode: string) => void) | null = null;
+  /** Gets the permission mode that the TUI's status line shows (Claude panes), or null when
+   * no status line can be read. Called when it changes. */
+  onMode: ((mode: string | null) => void) | null = null;
+  /** Gets the terminal title the TUI sets (OSC 0 or OSC 2). */
+  onTitle: ((title: string) => void) | null = null;
   private modeTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastMode: string | null | undefined = undefined;
 
-  constructor(key: string, projectId: string) {
+  constructor(key: string, projectId: string, agent: string) {
     this.key = key;
     this.projectId = projectId;
     this.el = document.createElement("div");
     this.el.className = "pane-term";
     this.el.style.height = "100%";
-    this.term = newTerminal(10000);
+    const imageKey = imagePasteKey(agent, isWindows);
+    this.term = newTerminal(10000, { imageKey });
     this.term.loadAddon(this.fit);
+    rightClickPaste(this.term, this.el, { imageKey });
+    this.term.onTitleChange((title) => this.onTitle?.(title));
     this.term.onData((data) => {
       if (this.exited) {
         if (data === "\r") this.start();
@@ -82,19 +82,40 @@ export class PaneTerm {
     this.modeTimer = setTimeout(() => {
       this.modeTimer = null;
       const m = this.shownMode();
-      if (m) this.onMode?.(m);
+      if (m !== this.lastMode) {
+        this.lastMode = m;
+        this.onMode?.(m);
+      }
     }, 150);
   }
 
-  /** The mode in the bottom lines of the screen, where Claude draws its status line. */
+  /** The mode in the bottom lines of the screen, where Claude draws its status line. Null
+   * when no line matches (see tui.ts). */
   shownMode(): string | null {
-    const buf = this.term.buffer.active;
-    const last = buf.baseY + this.term.rows - 1;
-    for (let y = last; y > last - 8 && y >= 0; y--) {
-      const line = buf.getLine(y)?.translateToString(true) ?? "";
-      for (const [re, mode] of MODE_LINES) if (re.test(line)) return mode;
+    try {
+      const buf = this.term.buffer.active;
+      const last = buf.baseY + this.term.rows - 1;
+      const lines: string[] = [];
+      for (let y = last; y > last - CLAUDE_STATUS_ROWS && y >= 0; y--) lines.push(buf.getLine(y)?.translateToString(true) ?? "");
+      return claudeMode(lines);
+    } catch {
+      return null;
     }
-    return null;
+  }
+
+  /** Waits until the shown mode is not `from` any more, at most `ms`. Returns the shown mode. */
+  async waitForMode(from: string | null, ms: number): Promise<string | null> {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      await new Promise((r) => setTimeout(r, 50));
+      const m = this.shownMode();
+      if (m !== from) {
+        // Let the status line finish drawing, then read it again.
+        await new Promise((r) => setTimeout(r, 120));
+        return this.shownMode();
+      }
+    }
+    return this.shownMode();
   }
 
   resize() {
@@ -137,6 +158,7 @@ export class PaneTerm {
   dispose() {
     if (this.modeTimer) clearTimeout(this.modeTimer);
     this.onMode = null;
+    this.onTitle = null;
     this.el.remove();
     this.term.dispose();
   }
@@ -192,14 +214,18 @@ function listenOnce() {
 
 export const paneTerms = {
   /** The terminal of a pane session, created on first use. */
-  get(key: string, projectId: string): PaneTerm {
+  get(key: string, projectId: string, agent: string): PaneTerm {
     listenOnce();
     let p = terms.get(key);
     if (!p) {
-      p = new PaneTerm(key, projectId);
+      p = new PaneTerm(key, projectId, agent);
       terms.set(key, p);
     }
     return p;
+  },
+  /** The terminal of a pane session, if it was created. */
+  find(key: string): PaneTerm | undefined {
+    return terms.get(key);
   },
   /** Called when the session closes. Rust has killed the TUI by then. */
   dispose(key: string) {
