@@ -2,6 +2,7 @@
 
 mod commands;
 mod files;
+mod git;
 mod hooks;
 mod pane;
 mod plan_folder;
@@ -139,6 +140,24 @@ pub fn run() {
             commands::turn_revert_file,
             commands::turn_file_versions,
             commands::turn_file_bytes,
+            git::git_status,
+            git::git_init,
+            git::git_stage,
+            git::git_stage_all,
+            git::git_unstage,
+            git::git_unstage_all,
+            git::git_discard,
+            git::git_commit,
+            git::git_branches,
+            git::git_switch,
+            git::git_create_branch,
+            git::git_fetch,
+            git::git_pull,
+            git::git_push,
+            git::git_log,
+            git::git_commit_files,
+            git::git_versions,
+            git::git_head_text,
             files::fs_list_dir,
             files::fs_all_files,
             files::fs_read,
