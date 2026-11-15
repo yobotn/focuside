@@ -7,6 +7,7 @@ pub mod files;
 pub mod plan;
 pub mod proc;
 pub mod project;
+pub mod replace;
 pub mod snapshot;
 pub mod summary;
 pub mod which;

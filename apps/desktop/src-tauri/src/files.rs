@@ -2,12 +2,15 @@
 
 use crate::project::Project;
 use crate::AppState;
-use focuside_core::files::{self, DirEntry, FileContent, SearchResult};
+use focuside_core::files::{self, DirEntry, FileContent, FileMatches, SearchQuery, SearchResult};
+use focuside_core::replace;
 use notify_debouncer_mini::notify::RecursiveMode;
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult};
+use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
@@ -69,35 +72,120 @@ pub async fn fs_write(
 ) -> Res<()> {
     let p = project(&state, &project_id)?;
     files::write_file(&p.root, &path, &content).map_err(|e| format!("{e:#}"))?;
-    if let Some(key) = p.running_session() {
+    note_user_saves(&state, &p, &[path]);
+    Ok(())
+}
+
+/// Saves by the user during a running turn count as "your edit", which Undo turn keeps.
+fn note_user_saves(state: &AppState, p: &Project, paths: &[String]) {
+    let Some(key) = p.running_session() else {
+        return;
+    };
+    let s = state.sessions.lock().unwrap().get(&key).cloned();
+    let pane = state.panes.lock().unwrap().get(&key).cloned();
+    for path in paths {
         let rel = path.replace('\\', "/");
-        let s = state.sessions.lock().unwrap().get(&key).cloned();
-        if let Some(s) = s {
+        if let Some(s) = &s {
             s.note_user_save(&rel);
         }
-        let pane = state.panes.lock().unwrap().get(&key).cloned();
-        if let Some(pane) = pane {
+        if let Some(pane) = &pane {
             pane.note_user_save(&rel);
         }
     }
-    Ok(())
 }
 
 #[tauri::command]
 pub async fn fs_search(
     state: State<'_, AppState>,
     project_id: String,
-    query: String,
-    case_sensitive: bool,
-    regex: bool,
+    query: SearchQuery,
 ) -> Res<SearchResult> {
     let p = project(&state, &project_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        files::search(&p.root, &query, case_sensitive, regex, 2000)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| format!("{e:#}"))
+    tauri::async_runtime::spawn_blocking(move || files::search(&p.root, &query, 2000))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// The files Replace all would change, with the number of matches in each.
+#[tauri::command]
+pub async fn fs_replace_preview(
+    state: State<'_, AppState>,
+    project_id: String,
+    query: SearchQuery,
+) -> Res<Vec<FileMatches>> {
+    let p = project(&state, &project_id)?;
+    tauri::async_runtime::spawn_blocking(move || files::count_matches(&p.root, &query, 5000))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Replace all batches of this run, for Undo. Only the newest few are kept.
+static REPLACES: Mutex<Vec<(String, String, replace::Batch)>> = Mutex::new(Vec::new());
+static REPLACE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceReply {
+    /// Pass to `fs_replace_undo`. None when Undo is not possible.
+    id: Option<String>,
+    #[serde(flatten)]
+    outcome: replace::ReplaceOutcome,
+}
+
+/// Replaces every match in the given files (from `fs_replace_preview`, after the user
+/// confirmed). A snapshot taken first makes Undo possible.
+#[tauri::command]
+pub async fn fs_replace(
+    state: State<'_, AppState>,
+    project_id: String,
+    query: SearchQuery,
+    replace: String,
+    paths: Vec<String>,
+) -> Res<ReplaceReply> {
+    let p = project(&state, &project_id)?;
+    let id = format!(
+        "{}-{}",
+        crate::turns::now(),
+        REPLACE_SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    let (batch, outcome) =
+        replace::replace_in_files(&p.root, &p.shadow, &id, &query, &replace, &paths)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+    note_user_saves(&state, &p, &batch.paths());
+    let id = outcome.undo.then(|| {
+        let mut list = REPLACES.lock().unwrap();
+        list.push((id.clone(), project_id.clone(), batch));
+        let extra = list.len().saturating_sub(10);
+        list.drain(..extra);
+        id
+    });
+    Ok(ReplaceReply { id, outcome })
+}
+
+/// Undo of one Replace all: files that changed since then stay as they are.
+#[tauri::command]
+pub async fn fs_replace_undo(
+    state: State<'_, AppState>,
+    project_id: String,
+    id: String,
+) -> Res<replace::UndoReplaceOutcome> {
+    let p = project(&state, &project_id)?;
+    let batch = {
+        let mut list = REPLACES.lock().unwrap();
+        let i = list
+            .iter()
+            .position(|(x, pid, _)| *x == id && *pid == project_id)
+            .ok_or_else(|| "This replace can no longer be undone.".to_string())?;
+        list.remove(i).2
+    };
+    let out = replace::undo_replace(&p.root, &p.shadow, &batch)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    note_user_saves(&state, &p, &out.restored);
+    Ok(out)
 }
 
 /// Watches the project folder. Changes go to the UI as `fs-changed` events and, during a

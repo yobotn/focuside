@@ -1210,10 +1210,12 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "flate2",
+ "globset",
  "grep-regex",
  "grep-searcher",
  "ignore",
  "libc",
+ "regex",
  "reqwest",
  "rustls",
  "serde",
