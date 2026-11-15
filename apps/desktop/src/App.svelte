@@ -13,6 +13,7 @@
   import MessageBox from "./lib/components/MessageBox.svelte";
   import Rail from "./lib/components/Rail.svelte";
   import UndoDialog from "./lib/components/UndoDialog.svelte";
+  import UndoBackDialog from "./lib/components/UndoBackDialog.svelte";
   import ChatConsent from "./lib/components/ChatConsent.svelte";
   import SidePanel from "./lib/components/SidePanel.svelte";
   import Viewer from "./lib/components/Viewer.svelte";
@@ -141,6 +142,7 @@
       { id: "term", label: t("cmd.terminal"), hint: keyLabel("Mod+`"), run: () => dock.toggle("terminal") },
       { id: "planPanel", label: t("cmd.planPanel"), run: () => dock.show("plan") },
       { id: "promptsPanel", label: t("cmd.promptsPanel"), run: () => dock.show("prompts") },
+      { id: "searchPrompts", label: t("cmd.searchPrompts"), run: () => app.searchPrompts() },
       { id: "sessionPanel", label: t("cmd.sessionPanel"), run: () => dock.show("session") },
       ...editorCommands(),
       { id: "plan", label: t("cmd.planFirst"), run: () => app.setPlanFirst(!app.planFirst) },
@@ -345,6 +347,7 @@
       // it stays with the editor (find panel, selections).
       if (e.defaultPrevented || editor.ask) return;
       if (app.undoTarget) app.undoTarget = null;
+      else if (app.undoBackTarget) app.undoBackTarget = null;
       else if (app.overlay) app.overlay = null;
       else if (app.viewer && !target?.closest(".cm-editor")) app.viewer = null;
       else if (session?.running) app.stop();
@@ -483,6 +486,10 @@
 
 {#if app.undoTarget}
   <UndoDialog target={app.undoTarget} />
+{/if}
+
+{#if app.undoBackTarget}
+  <UndoBackDialog target={app.undoBackTarget} />
 {/if}
 
 {#if editor.ask}

@@ -10,12 +10,15 @@
   import { app, type Project } from "../stores/app.svelte";
   import { paneTerms, type PaneTerm } from "../stores/paneterm.svelte";
   import type { Session } from "../stores/session.svelte";
+  import { bucketDots, dotOf, firstLine as cut, promptState, stepPrompt } from "../prompts";
 
   let { session, project }: { session: Session; project: Project } = $props();
 
   let host: HTMLDivElement | undefined = $state();
   let pane: PaneTerm | null = $state(null);
   let ro: ResizeObserver | null = null;
+  let strip: HTMLElement | undefined = $state();
+  let stripHeight = $state(0);
 
   const name = $derived(app.agentName(session.agent));
   // The mode switch needs Claude and hook events: they say when no prompt runs, so Shift+Tab
@@ -70,9 +73,67 @@
   const prompts = $derived(session.promptList);
 
   function firstLine(text: string): string {
-    const line = text.trim().split("\n")[0] ?? "";
-    return line.length > 80 ? line.slice(0, 77) + "..." : line || t("prompts.empty");
+    return cut(text) || t("prompts.empty");
   }
+
+  // One dot per prompt while they fit (8 px dot and 6 px gap); with more prompts, each dot holds
+  // several (bucketDots), so the strip never scrolls.
+  const DOT_PITCH = 14;
+  const dots = $derived(
+    bucketDots(
+      prompts.map((p, i) => promptState(p, i === prompts.length - 1, session.busy)),
+      stripHeight ? Math.max(1, Math.floor((stripHeight - 16 + 6) / DOT_PITCH)) : prompts.length,
+    ),
+  );
+  const currentIndex = $derived.by(() => {
+    const id = app.promptsCurrent[session.key];
+    return id ? prompts.findIndex((p) => p.id === id) : -1;
+  });
+  const currentDot = $derived(dotOf(dots, currentIndex));
+
+  function time(at: number | null): string {
+    return at ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  }
+
+  function dotTip(d: { start: number; end: number }): string {
+    const text = firstLine(prompts[d.start].prompt);
+    const at = prompts[d.start].at;
+    if (d.end > d.start) return t("prompts.dotRange", { from: d.start + 1, to: d.end + 1, text });
+    return at ? t("prompts.dotTip", { n: d.start + 1, time: time(at), text }) : t("prompts.dot", { n: d.start + 1, text });
+  }
+
+  /** A dot that holds the current prompt opens it; else its first prompt. */
+  function openDot(d: { start: number; end: number }) {
+    const i = currentIndex >= d.start && currentIndex <= d.end ? currentIndex : d.start;
+    app.showPrompts(session.key, prompts[i].id);
+  }
+
+  // Alt+Up and Alt+Down step from prompt to prompt, Home and End go to the first and last. Only
+  // on the strip: the terminal keeps its keys.
+  function onstripkey(e: KeyboardEvent) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+    let move: "prev" | "next" | "first" | "last" | null = null;
+    if (e.altKey && e.key === "ArrowUp") move = "prev";
+    else if (e.altKey && e.key === "ArrowDown") move = "next";
+    else if (!e.altKey && e.key === "Home") move = "first";
+    else if (!e.altKey && e.key === "End") move = "last";
+    if (!move) return;
+    e.preventDefault();
+    const i = stepPrompt(
+      prompts.map((_, k) => k),
+      currentIndex,
+      move,
+    );
+    if (i >= 0) app.showPrompts(session.key, prompts[i].id);
+  }
+
+  $effect(() => {
+    const el = strip;
+    if (!el) return;
+    const obs = new ResizeObserver(() => (stripHeight = el.clientHeight));
+    obs.observe(el);
+    return () => obs.disconnect();
+  });
 
   onMount(() => {
     pane = paneTerms.get(session.key, project.id, session.agent);
@@ -123,15 +184,17 @@
   <div class="body">
     <div class="term" bind:this={host}></div>
     {#if prompts.length}
-      <nav class="dots" aria-label={t("prompts.title")}>
-        {#each prompts as p, i (p.id)}
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <nav class="dots" aria-label={t("prompts.strip")} bind:this={strip} onkeydown={onstripkey}>
+        {#each dots as d, di (d.start)}
           <button
-            class="pdot"
-            class:untracked={p.untracked != null}
-            class:changed={!!p.result?.changes?.files.length}
-            title={firstLine(p.prompt)}
-            aria-label={t("prompts.dot", { n: i + 1, text: firstLine(p.prompt) })}
-            onclick={() => app.showPrompts(session.key, p.id)}
+            class="pdot {d.state}"
+            class:many={d.end > d.start}
+            class:current={di === currentDot}
+            aria-current={di === currentDot ? "true" : undefined}
+            title={dotTip(d)}
+            aria-label={dotTip(d)}
+            onclick={() => openDot(d)}
           ></button>
         {/each}
       </nav>
@@ -211,15 +274,45 @@
     border: 1px solid var(--fg-muted);
     background: transparent;
   }
+  /* A dot that holds several prompts is a square. */
+  .pdot.many {
+    border-radius: 2px;
+  }
   .pdot.changed {
     background: var(--accent);
     border-color: var(--accent);
   }
+  .pdot.working {
+    border-color: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .pdot.failed {
+    background: var(--danger);
+    border-color: var(--danger);
+  }
+  .pdot.undone {
+    border-color: var(--accent);
+    border-style: dashed;
+  }
   .pdot.untracked {
     border-color: var(--warn);
+  }
+  .pdot.current {
+    outline: 2px solid var(--fg);
+    outline-offset: 1px;
   }
   .pdot:hover,
   .pdot:focus-visible {
     transform: scale(1.4);
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pdot.working {
+      animation: none;
+    }
   }
 </style>

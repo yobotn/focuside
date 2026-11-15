@@ -4,6 +4,7 @@
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import type { HighlighterCore } from "shiki/core";
+import { matchRanges } from "./prompts";
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: false, typographer: false });
 // Files in the project are documents: embedded HTML (READMEs use it a lot) renders, sanitized.
@@ -221,4 +222,29 @@ export async function highlightCode(text: string, lang: string): Promise<string 
       defaultColor: false,
     }),
   );
+}
+
+/**
+ * Marks every match of `query` in the text of a rendered document with `<mark class="hit">`
+ * (the Prompts panel search). Earlier marks are removed first, so an empty query clears them.
+ */
+export function markMatches(root: HTMLElement, query: string) {
+  for (const m of Array.from(root.querySelectorAll("mark.hit"))) m.replaceWith(document.createTextNode(m.textContent ?? ""));
+  root.normalize();
+  if (!query.trim()) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+  for (const node of nodes) {
+    const ranges = matchRanges(node.data, query);
+    for (let i = ranges.length - 1; i >= 0; i--) {
+      const [a, b] = ranges[i];
+      const hit = node.splitText(a);
+      hit.splitText(b - a);
+      const mark = document.createElement("mark");
+      mark.className = "hit";
+      hit.replaceWith(mark);
+      mark.append(hit);
+    }
+  }
 }

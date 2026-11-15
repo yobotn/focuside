@@ -1,19 +1,22 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { highlightIn, renderDocument, renderMarkdown } from "../markdown";
+  import { highlightIn, markMatches, renderDocument, renderMarkdown } from "../markdown";
 
   let {
     text,
     streaming = false,
     class: cls = "",
     doc,
+    mark = "",
   }: {
     text: string;
     streaming?: boolean;
     class?: string;
     /** A markdown file in a project: embedded HTML, local images and links between files. */
     doc?: { projectId: string; path: string; open: (path: string) => void };
+    /** Text to mark in the rendered document (a search). */
+    mark?: string;
   } = $props();
 
   let el: HTMLDivElement | undefined = $state();
@@ -40,6 +43,13 @@
         loadImages(target);
       });
     }
+  });
+
+  $effect(() => {
+    void html;
+    const q = mark;
+    const target = el;
+    if (target && (q || target.querySelector("mark.hit"))) queueMicrotask(() => markMatches(target, q));
   });
 
   /** Joins a link inside the document with the document's folder. Null when it leaves the project. */

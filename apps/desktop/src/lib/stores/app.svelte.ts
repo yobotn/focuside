@@ -54,6 +54,9 @@ export interface Settings {
    * to the project root. Claude panes FocusIDE starts get it as `plansDirectory`; snapshots
    * skip it. */
   planFolder: string;
+  /** How the Prompts panel shows prompts: a list of rows, or the prompts and answers as one
+   * document ("conversation"). */
+  promptsView: PromptsView;
 }
 
 /** Agents that open in a pane by default and ask once before chat mode. Antigravity: Google's
@@ -72,6 +75,7 @@ export function agentNote(id: string): string {
 }
 
 export type SessionTabs = "top" | "side";
+export type PromptsView = "list" | "conversation";
 
 /** Panel places and sizes. The dock holds the Session panel, side bar, viewer, plan, prompts and terminal (see lib/dock.ts). */
 export interface Layout {
@@ -129,7 +133,7 @@ const defaults: Persisted = {
   panels: { plan: false, prompts: false, terminal: false },
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [], planFolder: "" },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [], planFolder: "", promptsView: "list" },
   filesVisible: true,
   layout: defaultLayout(),
 };
@@ -183,6 +187,13 @@ class AppStore {
   promptsVisible = $state(false);
   /** The prompt the Prompts panel opens and scrolls to (a click on a dot of the pane strip). */
   promptsFocus = $state<{ sessionKey: string; id: string | null; seq: number } | null>(null);
+  /** The current prompt per session key: the one the Prompts panel steps from, highlighted in
+   * the dot strip of the pane. */
+  promptsCurrent = $state<Record<string, string>>({});
+  /** Bumped by "Search prompts": the Prompts panel moves the focus into its search box. */
+  promptsSearchSeq = $state(0);
+  /** The "Undo back to this prompt" dialog: the turns to undo, newest first. */
+  undoBackTarget = $state<{ sessionKey: string; promptId: string; turns: { id: string; turnId: string; prompt: string }[]; files: string[] } | null>(null);
   /** The newest request to show a panel, for the dock: showPlan() and showPrompts() set it. */
   panelRequest = $state<{ panel: "plan" | "prompts"; seq: number } | null>(null);
   private panelSeq = 0;
@@ -265,6 +276,7 @@ class AppStore {
       if (typeof this.settings.claudeBrief !== "boolean") this.settings.claudeBrief = false;
       if (this.settings.sessionTabs !== "side") this.settings.sessionTabs = "top";
       if (typeof this.settings.planFolder !== "string") this.settings.planFolder = "";
+      if (this.settings.promptsView !== "conversation") this.settings.promptsView = "list";
       // Snapshots skip the plan folder. A folder Rust refuses counts as Claude's default.
       if (this.settings.planFolder)
         await api.planFolderSet(this.settings.planFolder).catch(() => (this.settings.planFolder = ""));
@@ -712,6 +724,55 @@ class AppStore {
       .catch(() => {});
   }
 
+  /** Palette "Search prompts": shows the Prompts panel with the focus in its search box. */
+  searchPrompts() {
+    const s = this.session;
+    if (!s) return;
+    this.showPrompts(s.key, null);
+    this.promptsSearchSeq++;
+  }
+
+  setPromptsView(view: PromptsView) {
+    this.settings.promptsView = view;
+    this.save();
+  }
+
+  /** Opens the dialog for "Undo back to this prompt". */
+  askUndoBack(s: Session, promptId: string, turns: { id: string; turnId: string | null; prompt: string }[], files: string[]) {
+    const list = turns.flatMap((p) => (p.turnId ? [{ id: p.id, turnId: p.turnId, prompt: p.prompt }] : []));
+    if (!list.length) return;
+    this.undoBackTarget = { sessionKey: s.key, promptId, turns: list, files };
+  }
+
+  /**
+   * Undoes the turns of `undoBackTarget` one by one, newest first, with the normal turn Undo.
+   * Files changed after a turn are kept (as "Keep mine" in the Undo dialog). Stops at the first
+   * error. Returns the error text, or null.
+   */
+  async undoBack(): Promise<string | null> {
+    const target = this.undoBackTarget;
+    const s = target && this.sessionFor(target.sessionKey);
+    if (!target || !s) return null;
+    let done = 0;
+    let exact = true;
+    for (const p of target.turns) {
+      const one = { projectId: s.projectId, turnId: p.turnId, entryId: p.id, sessionKey: s.key };
+      try {
+        const out = await api.undo(s.projectId, p.turnId, []);
+        this.applyUndo(one, out, true);
+        exact &&= out.exact;
+        done++;
+      } catch (e) {
+        if (done && s.mode === "pane") s.note(t("pane.undoNote", { agent: this.agentName(s.agent) }), "warn");
+        return t("undoBack.failed", { done, count: target.turns.length, error: errText(e) });
+      }
+    }
+    if (s.mode === "pane") s.note(t("pane.undoNote", { agent: this.agentName(s.agent) }), "warn");
+    this.undoBackTarget = null;
+    this.flash(exact ? t("undoBack.done", { count: done }) : t("undoBack.partial", { count: done }));
+    return null;
+  }
+
   /** Settings > Plan folder. "" is Claude's default. Returns false for a folder outside the project. */
   async setPlanFolder(folder: string): Promise<boolean> {
     try {
@@ -995,7 +1056,8 @@ class AppStore {
     return { s, e };
   }
 
-  applyUndo(target: { entryId: string; sessionKey: string; projectId: string; turnId: string }, outcome: UndoOutcome) {
+  /** `quiet`: no note in a pane (Undo back to a prompt adds one note for all turns). */
+  applyUndo(target: { entryId: string; sessionKey: string; projectId: string; turnId: string }, outcome: UndoOutcome, quiet = false) {
     const { e } = this.entryOf(target);
     if (e && (e.t === "plan" || e.t === "changes")) e.undo = { outcome };
     this.markUndo(target, { outcome });
@@ -1003,7 +1065,7 @@ class AppStore {
     // Chat sessions tell the agent in the next prompt. A pane gets nothing typed in, so the
     // user is told instead.
     const s = this.sessionFor(target.sessionKey);
-    if (s?.mode === "pane") s.note(t("pane.undoNote", { agent: this.agentName(s.agent) }), "warn");
+    if (s?.mode === "pane" && !quiet) s.note(t("pane.undoNote", { agent: this.agentName(s.agent) }), "warn");
   }
 
   /**
