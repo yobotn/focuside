@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { CaretDown, CaretRight, PushPin } from "phosphor-svelte";
   import { t } from "../i18n";
   import { invalidate } from "../files.svelte";
   import { app, type Project } from "../stores/app.svelte";
+  import { editor } from "../stores/editor.svelte";
   import FileIcon from "./FileIcon.svelte";
 
   interface Node {
@@ -87,11 +88,37 @@
     if (expanded[n.path] && !children[n.path]) load(n.path);
   }
 
-  function open(n: Node) {
+  /** A click opens a file as the preview tab; a double click, Enter or Space keeps it open. */
+  function open(n: Node, pin = false) {
     cursor = n.path;
-    if (n.dir) toggle(n);
-    else app.viewer = { kind: "file", projectId: project.id, path: n.path };
+    if (n.dir) {
+      if (!pin) toggle(n);
+    } else editor.open(project.id, n.path, { pin });
   }
+
+  /** Shows a file or folder: opens the folders above it, selects it and scrolls to it. */
+  async function revealPath(path: string) {
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join("/");
+      expanded[dir] = true;
+      if (!children[dir]) await load(dir);
+    }
+    cursor = path;
+    await tick();
+    const row = tree?.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`);
+    row?.scrollIntoView({ block: "center" });
+    tree?.focus();
+  }
+
+  // Breadcrumbs and the tab menu ask to reveal a path.
+  let lastReveal = 0;
+  $effect(() => {
+    const r = editor.reveal;
+    if (!r || r.seq === lastReveal || r.projectId !== project.id) return;
+    lastReveal = r.seq;
+    untrack(() => revealPath(r.path));
+  });
 
   function onkeydown(e: KeyboardEvent) {
     const i = rows.findIndex((r) => r.node.path === cursor);
@@ -107,18 +134,18 @@
         const parent = cur.path.includes("/") ? cur.path.slice(0, cur.path.lastIndexOf("/")) : null;
         if (parent) cursor = parent;
       }
-    } else if (e.key === "Enter" && cur) open(cur);
+    } else if ((e.key === "Enter" || e.key === " ") && cur) open(cur, !cur.dir);
     else return;
     e.preventDefault();
     queueMicrotask(() => tree?.querySelector(`[data-path="${CSS.escape(cursor ?? "")}"]`)?.scrollIntoView({ block: "nearest" }));
   }
 
-  const viewing = $derived(app.viewer?.kind === "file" ? app.viewer.path : null);
+  const viewing = $derived(app.viewer?.kind === "file" && app.viewer.projectId === project.id ? app.viewer.path : null);
 </script>
 
 <div class="files">
   {#if pinned}
-    <button class="row pinned" class:on={viewing === pinned.path} onclick={() => open(pinned)}>
+    <button class="row pinned" class:on={viewing === pinned.path} onclick={() => open(pinned)} ondblclick={() => open(pinned, true)}>
       <PushPin size={12} class="shrink-0 text-fg-faint" />
       <FileIcon path={pinned.name} size={15} />
       <span class="truncate">{pinned.name}</span>
@@ -144,6 +171,7 @@
         aria-selected={viewing === node.path}
         tabindex="-1"
         onclick={() => open(node)}
+        ondblclick={() => open(node, true)}
         title={node.path}
       >
         <span class="caret">

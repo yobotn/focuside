@@ -1,89 +1,79 @@
 <script lang="ts">
+  // The viewer: editor tabs (stores/editor.svelte.ts), breadcrumbs, and the open file in
+  // CodeMirror, rendered Markdown, an image or a PDF. The diff tab shows a turn's changes.
+  // Ctrl+Page Up and Page Down switch tabs while the focus is in the viewer.
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { ArrowCounterClockwise, CaretLeft, CaretRight, X } from "phosphor-svelte";
   import { api, errText } from "../api";
   import { formatSize } from "../editor";
   import { t } from "../i18n";
-  import { keyLabel, mod } from "../platform";
+  import { keyLabel } from "../platform";
   import { app, type Project } from "../stores/app.svelte";
   import type { FileVersions } from "../types";
   import { dock } from "../stores/dock.svelte";
+  import { editor } from "../stores/editor.svelte";
+  import Breadcrumbs from "./Breadcrumbs.svelte";
   import CodeEditor from "./CodeEditor.svelte";
   import DockGrip from "./DockGrip.svelte";
-  import FileIcon from "./FileIcon.svelte";
+  import EditorTabs from "./EditorTabs.svelte";
   import ImageView from "./ImageView.svelte";
   import Markdown from "./Markdown.svelte";
   import PdfView from "./PdfView.svelte";
   import { imageBlob, mediaKind, mediaLimit } from "../media";
 
-  type Content =
-    | { kind: "text"; content: string; size: number }
-    | { kind: "binary"; size: number }
-    | { kind: "large"; size: number }
-    | { kind: "missing" };
-
   let { project }: { project: Project } = $props();
 
-  const v = $derived(app.viewer!);
-  const path = $derived(v.kind === "file" ? v.path : v.paths[v.index]);
+  const w = $derived(editor.get(project.id));
+  const tab = $derived(w?.current ?? null);
+  const fileTab = $derived(tab?.kind === "file" ? tab : null);
+  const diffTab = $derived(tab?.kind === "diff" ? tab : null);
+  const doc = $derived(fileTab && w ? w.docs[fileTab.path] : undefined);
+  const path = $derived(fileTab ? fileTab.path : diffTab ? (diffTab.paths[diffTab.index] ?? "") : "");
+  const content = $derived(doc?.content ?? null);
   const isMd = $derived(/\.(md|markdown|mdx)$/i.test(path));
   const isSvg = $derived(/\.svg$/i.test(path));
   const media = $derived(mediaKind(path));
 
-  let content = $state<Content | null>(null);
-  let text = $state("");
-  let saved = $state("");
-  let error = $state<string | null>(null);
-  let source = $state(false);
-  let changedOnDisk = $state(false);
+  /** Markdown and SVG files show rendered; this set holds the files switched to source. */
+  let sourceOf = $state<Record<string, boolean>>({});
+  const source = $derived(!!sourceOf[path]);
   let versions = $state<FileVersions | null>(null);
-  let panel: HTMLElement | undefined = $state();
+  let diffError = $state<string | null>(null);
   // Image or PDF bytes for the file view, and both sides of a changed image in the diff view.
-  let mediaData = $state.raw<{ path: string; buf: ArrayBuffer } | null>(null);
+  let mediaData = $state.raw<{ path: string; rev: number; buf: ArrayBuffer } | null>(null);
   let mediaError = $state<string | null>(null);
   let diffImages = $state.raw<{ before: Blob | null; after: Blob | null } | null>(null);
 
-  const dirty = $derived(content?.kind === "text" && text !== saved);
+  const dirty = $derived(!!doc?.dirty);
 
-  async function loadFile(p: string) {
-    error = null;
-    changedOnDisk = false;
-    try {
-      const c = await invoke<Content>("fs_read", { projectId: project.id, path: p });
-      if (p !== path) return;
-      content = c;
-      if (c.kind === "text") {
-        text = c.content;
-        saved = c.content;
-      }
-      await loadMedia(p, c);
-    } catch (e) {
-      error = errText(e);
-    }
-  }
+  // A jump to a line (a search result, Quick open) in Markdown or SVG shows the source.
+  $effect(() => {
+    const j = editor.jump;
+    if (j && j.projectId === project.id && /\.(md|markdown|mdx|svg)$/i.test(j.path)) sourceOf[j.path] = true;
+  });
 
   /** Loads image or PDF bytes. SVG files that are text render from the text instead. */
-  async function loadMedia(p: string, c: Content) {
+  $effect(() => {
+    const p = path;
+    const c = content;
+    const rev = doc?.rev ?? 0;
+    if (!fileTab) return;
     const kind = mediaKind(p);
-    if (!kind || c.kind === "missing" || c.kind === "text" || c.size > mediaLimit(kind)) {
-      if (mediaData?.path !== p) mediaData = null;
-      return;
-    }
-    try {
-      const buf = await invoke<ArrayBuffer>("fs_media", { projectId: project.id, path: p });
-      if (p === path) {
-        mediaError = null;
-        mediaData = { path: p, buf };
-      }
-    } catch (e) {
-      if (p === path) mediaError = errText(e);
-    }
-  }
+    if (!kind || !c || c.kind === "missing" || c.kind === "text" || c.size > mediaLimit(kind)) return;
+    if (mediaData?.path === p && mediaData.rev === rev) return;
+    mediaError = null;
+    invoke<ArrayBuffer>("fs_media", { projectId: project.id, path: p })
+      .then((buf) => {
+        if (p === path) mediaData = { path: p, rev, buf };
+      })
+      .catch((e) => {
+        if (p === path) mediaError = errText(e);
+      });
+  });
 
   async function loadDiff(turnId: string, p: string) {
-    error = null;
+    diffError = null;
     versions = null;
     diffImages = null;
     try {
@@ -99,151 +89,122 @@
       }
       if (p === path) versions = r;
     } catch (e) {
-      error = errText(e);
+      diffError = errText(e);
     }
   }
 
   $effect(() => {
-    const cur = app.viewer;
-    if (!cur) return;
-    if (cur.kind === "file") {
-      source = false;
-      mediaError = null;
-      loadFile(cur.path);
-    } else {
-      loadDiff(cur.turnId, cur.paths[cur.index]);
-    }
+    const d = diffTab;
+    if (d) loadDiff(d.turnId, d.paths[d.index]);
   });
-
-  // Changed on disk: reload, or ask when there are unsaved edits.
-  $effect(() => {
-    const id = project.id;
-    const un = listen<{ projectId: string; paths: string[] }>("fs-changed", async (e) => {
-      if (e.payload.projectId !== id || app.viewer?.kind !== "file") return;
-      if (!e.payload.paths.includes(path)) return;
-      const c = await invoke<Content>("fs_read", { projectId: id, path }).catch(() => null);
-      if (!c) return;
-      if (c.kind === "text" && c.content === saved) return;
-      if (dirty) changedOnDisk = true;
-      else {
-        content = c;
-        if (c.kind === "text") {
-          text = c.content;
-          saved = c.content;
-        }
-        loadMedia(path, c);
-      }
-    });
-    return () => {
-      un.then((f) => f());
-    };
-  });
-
-  async function save() {
-    if (!dirty) return;
-    try {
-      await invoke("fs_write", { projectId: project.id, path, content: text });
-      saved = text;
-      changedOnDisk = false;
-      app.flash(t("viewer.saved"));
-    } catch (e) {
-      app.flash(t("viewer.saveFailed", { error: errText(e) }), "error");
-    }
-  }
-
-  function close() {
-    app.viewer = null;
-  }
 
   function step(d: number) {
-    const cur = app.viewer;
-    if (cur?.kind !== "diff") return;
-    const i = Math.max(0, Math.min(cur.paths.length - 1, cur.index + d));
-    app.viewer = { ...cur, index: i };
+    if (w && diffTab) editor.stepDiff(w, diffTab.index + d);
   }
 
   async function revertFile() {
-    const cur = app.viewer;
-    if (cur?.kind !== "diff") return;
+    if (!diffTab) return;
+    const p = diffTab.paths[diffTab.index];
     try {
-      const out = await api.revertFile(project.id, cur.turnId, cur.paths[cur.index]);
-      app.flash(out.failed.length ? out.failed[0][1] : t("undo.revertFileDone", { path: cur.paths[cur.index] }), out.failed.length ? "error" : "muted");
+      const out = await api.revertFile(project.id, diffTab.turnId, p);
+      app.flash(out.failed.length ? out.failed[0][1] : t("undo.revertFileDone", { path: p }), out.failed.length ? "error" : "muted");
     } catch (e) {
       app.flash(errText(e), "error");
     }
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (v.kind !== "diff") return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // Ctrl+Page Up and Page Down: the previous or next editor tab (Ctrl on every OS, as in
+    // VS Code). Ctrl+Shift+Page Up and Page Down stay with the session tabs.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && (e.key === "PageUp" || e.key === "PageDown") && w) {
+      e.preventDefault();
+      e.stopPropagation();
+      editor.cycle(w, e.key === "PageUp" ? -1 : 1);
+      return;
+    }
+    if (!diffTab) return;
+    const el = e.target as HTMLElement | null;
+    const typing = !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable);
+    if (typing || e.ctrlKey || e.metaKey || e.altKey || app.overlay || app.undoTarget) return;
     if (e.key === "j" || e.key === "J") step(1);
     else if (e.key === "k" || e.key === "K") step(-1);
     else return;
     e.preventDefault();
   }
 
-  function onwindowkey(e: KeyboardEvent) {
-    const el = e.target as HTMLElement | null;
-    const typing = !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable);
-    if (v.kind === "diff" && !typing && !app.overlay && !app.undoTarget) {
-      onkeydown(e);
-      if (e.defaultPrevented) return;
-    }
-    if (mod(e) && e.key.toLowerCase() === "s" && v.kind === "file") {
-      e.preventDefault();
-      save();
-    }
+  function close() {
+    if (w) editor.hide(w);
+  }
+
+  function pinActive() {
+    if (w && fileTab?.preview) editor.pin(w, fileTab.path);
   }
 
   const name = $derived(path.split("/").pop() ?? path);
   // An SVG that is text renders from the editor text, so unsaved edits show too.
-  const svgBlob = $derived(isSvg && content?.kind === "text" ? imageBlob(path, text) : null);
+  const svgBlob = $derived(isSvg && content?.kind === "text" && doc ? imageBlob(path, doc.text) : null);
   const mediaBlob = $derived(media === "image" && mediaData?.path === path ? imageBlob(path, mediaData.buf) : null);
   const pdfData = $derived(media === "pdf" && mediaData?.path === path ? new Uint8Array(mediaData.buf) : null);
   const mediaTooBig = $derived(!!media && !!content && content.kind !== "missing" && content.kind !== "text" && content.size > mediaLimit(media));
 </script>
 
-<svelte:window onkeydown={onwindowkey} />
-
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-<section class="viewer" bind:this={panel} tabindex="-1" {onkeydown} aria-label={path}>
+<section class="viewer" tabindex="-1" {onkeydown} aria-label={path ? t("editor.label", { path }) : t("dock.viewer")}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <header class="head" onpointerdown={(e) => dock.fromHeader("viewer", e)}>
-    <FileIcon {path} size={15} />
-    {#if v.kind === "diff"}
-      <span class="text-fg-muted">{t("viewer.diff")}</span>
-    {/if}
-    <span class="truncate font-medium" title={path}>{path}</span>
-    {#if dirty}<span class="dot" title={t("viewer.unsaved")}></span>{/if}
-    <span class="flex-1"></span>
-    {#if v.kind === "diff"}
-      <span class="text-fg-muted">{t("viewer.diffOf", { index: v.index + 1, count: v.paths.length })}</span>
-      <button class="icon-btn" onclick={() => step(-1)} disabled={v.index === 0} title="{t('viewer.prevFile')} (K)" aria-label={t("viewer.prevFile")}><CaretLeft size={14} /></button>
-      <button class="icon-btn" onclick={() => step(1)} disabled={v.index >= v.paths.length - 1} title="{t('viewer.nextFile')} (J)" aria-label={t("viewer.nextFile")}><CaretRight size={14} /></button>
-      <button class="btn h-6" onclick={revertFile} title={t("undo.revertFile")}><ArrowCounterClockwise size={13} />{t("undo.revertFile")}</button>
-    {:else if (isMd || isSvg) && content?.kind === "text"}
-      <button class="btn h-6" onclick={() => (source = !source)}>{source ? t("viewer.preview") : t("viewer.source")}</button>
-    {/if}
-    {#if v.kind === "file" && dirty}
-      <button class="btn h-6" onclick={save} title={keyLabel("Mod+S")}>{t("common.save")}</button>
-    {/if}
+    {#if w}<EditorTabs {project} {w} />{/if}
+    <span class="grab" title={t("dock.tabHint")}></span>
     <DockGrip panel="viewer" />
     <button class="icon-btn" onclick={close} title="{t('viewer.close')} (Esc)" aria-label={t("viewer.close")}><X size={14} /></button>
   </header>
 
-  {#if changedOnDisk}
-    <div class="banner">
-      <span>{t("viewer.changedOnDisk")}</span>
-      <button class="btn h-6" onclick={() => loadFile(path)}>{t("viewer.reload")}</button>
-      <button class="btn h-6" onclick={() => (changedOnDisk = false)}>{t("viewer.keepMine")}</button>
+  {#if fileTab}
+    <div class="bar">
+      <Breadcrumbs projectId={project.id} {path} />
+      <span class="flex-1"></span>
+      {#if (isMd || isSvg) && content?.kind === "text"}
+        <button class="btn h-6" onclick={() => (sourceOf[path] = !source)}>{source ? t("viewer.preview") : t("viewer.source")}</button>
+      {/if}
+      {#if dirty}
+        <button class="btn h-6" onclick={() => editor.saveActive()} title={keyLabel("Mod+S")}>{t("common.save")}</button>
+      {/if}
+    </div>
+  {:else if diffTab}
+    <div class="bar">
+      <span class="text-fg-muted">{t("viewer.diff")}</span>
+      <span class="truncate font-medium" title={path}>{path}</span>
+      <span class="flex-1"></span>
+      <span class="text-fg-muted">{t("viewer.diffOf", { index: diffTab.index + 1, count: diffTab.paths.length })}</span>
+      <button class="icon-btn" onclick={() => step(-1)} disabled={diffTab.index === 0} title="{t('viewer.prevFile')} (K)" aria-label={t("viewer.prevFile")}><CaretLeft size={14} /></button>
+      <button class="icon-btn" onclick={() => step(1)} disabled={diffTab.index >= diffTab.paths.length - 1} title="{t('viewer.nextFile')} (J)" aria-label={t("viewer.nextFile")}><CaretRight size={14} /></button>
+      <button class="btn h-6" onclick={revertFile} title={t("undo.revertFile")}><ArrowCounterClockwise size={13} />{t("undo.revertFile")}</button>
+    </div>
+  {/if}
+
+  {#if doc?.disk && w}
+    <div class="banner" role="alert">
+      <span class="flex-1">{doc.disk === "deleted" ? t("viewer.deletedOnDisk") : t("viewer.changedOnDisk")}</span>
+      <button class="btn h-6" onclick={() => w && doc && editor.keepMine(w, doc)}>{t("viewer.keepMine")}</button>
+      {#if doc.disk === "deleted"}
+        <button
+          class="btn h-6"
+          onclick={() => {
+            if (!w || !doc) return;
+            doc.text = doc.saved;
+            editor.close(w, [doc.path]);
+          }}>{t("viewer.closeFile")}</button
+        >
+      {:else}
+        <button class="btn h-6" onclick={() => w && doc && editor.reload(w, doc)}>{t("viewer.loadFromDisk")}</button>
+      {/if}
     </div>
   {/if}
 
   <div class="body">
-    {#if error}
-      <p class="p-4 text-danger selectable">{error}</p>
-    {:else if v.kind === "diff"}
-      {#if !versions}
+    {#if diffTab}
+      {#if diffError}
+        <p class="p-4 text-danger selectable">{diffError}</p>
+      {:else if !versions}
         <p class="p-4 text-fg-muted">{t("common.loading")}</p>
       {:else if versions.binary && diffImages}
         <div class="sides">
@@ -266,13 +227,17 @@
       {:else}
         <CodeEditor {path} text={versions.after} original={versions.before ?? ""} readonly />
       {/if}
+    {:else if !doc}
+      <p class="p-4 text-fg-muted">{t("viewer.noFile")}</p>
+    {:else if doc.error}
+      <p class="p-4 text-danger selectable">{doc.error}</p>
     {:else if !content}
       <p class="p-4 text-fg-muted">{t("common.loading")}</p>
-    {:else if content.kind === "missing"}
+    {:else if content.kind === "missing" && !doc.disk}
       <p class="p-4 text-fg-muted">{t("viewer.notFound", { path })}</p>
     {:else if !source && svgBlob}
       {#key path}<ImageView blob={svgBlob} label={name} />{/key}
-    {:else if media && content.kind !== "text" && (mediaTooBig || mediaError)}
+    {:else if media && content.kind !== "text" && content.kind !== "missing" && (mediaTooBig || mediaError)}
       <div class="p-4">
         <p class="mb-3 text-fg-muted selectable">
           {#if mediaError}
@@ -285,11 +250,11 @@
           {t("viewer.openSystem")}
         </button>
       </div>
-    {:else if mediaBlob}
+    {:else if mediaBlob && content.kind !== "text"}
       {#key path}<ImageView blob={mediaBlob} label={name} />{/key}
-    {:else if pdfData}
+    {:else if pdfData && content.kind !== "text"}
       {#key path}<PdfView data={pdfData} />{/key}
-    {:else if media && content.kind !== "text"}
+    {:else if media && content.kind !== "text" && content.kind !== "missing"}
       <p class="p-4 text-fg-muted">{t("common.loading")}</p>
     {:else if content.kind === "binary" || content.kind === "large"}
       <div class="p-4">
@@ -302,13 +267,12 @@
       </div>
     {:else if isMd && !source}
       <div class="md">
-        <Markdown {text} doc={{ projectId: project.id, path, open: (p) => (app.viewer = { kind: "file", projectId: project.id, path: p }) }} />
+        <Markdown text={doc.text} doc={{ projectId: project.id, path, open: (p) => editor.open(project.id, p) }} />
       </div>
     {:else}
-      <CodeEditor {path} {text} onchange={(t2) => (text = t2)} onsave={save} />
+      <CodeEditor {doc} projectId={project.id} onsave={() => editor.saveActive()} onedit={pinActive} />
     {/if}
   </div>
-  <span class="sr-only">{name}</span>
 </section>
 
 <style>
@@ -323,20 +287,31 @@
   }
   .head {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 40px;
-    padding: 0 8px 0 12px;
+    align-items: stretch;
+    height: 36px;
+    padding-inline-end: 6px;
     border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
     flex-shrink: 0;
     min-width: 0;
   }
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--fg-muted);
+  .head > :global(.icon-btn),
+  .head > :global(.grip) {
+    align-self: center;
+  }
+  .grab {
+    flex: 1;
+    min-width: 24px;
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 8px 0 8px;
+    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    min-width: 0;
   }
   .banner {
     display: flex;

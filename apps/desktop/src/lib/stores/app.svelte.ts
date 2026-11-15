@@ -116,6 +116,8 @@ interface Persisted {
   settings: Settings;
   filesVisible: boolean;
   layout: Layout;
+  /** Editor tabs per project root (stores/editor.svelte.ts). */
+  editor?: unknown;
 }
 
 const defaults: Persisted = {
@@ -137,7 +139,19 @@ export interface Project extends ProjectInfo {
   activeKey: string | null;
 }
 
-export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "search" | "settings" | "model" | "new";
+export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "settings" | "model" | "new";
+
+export type ViewerTarget =
+  | null
+  | { kind: "file"; projectId: string; path: string }
+  | { kind: "diff"; projectId: string; turnId: string; paths: string[]; index: number; sessionKey: string };
+
+/** The editor store, which owns the viewer's tabs. */
+export interface ViewerHost {
+  setViewer(v: ViewerTarget): void;
+  /** Asks about unsaved files of a project before it closes. False: the user cancelled. */
+  canCloseProject(projectId: string): Promise<boolean>;
+}
 
 class AppStore {
   ready = $state(false);
@@ -181,12 +195,26 @@ class AppStore {
   undoTarget = $state<{ projectId: string; turnId: string; entryId: string; sessionKey: string } | null>(null);
   /** Last undo, for "Redo last undo" in the palette. */
   lastUndo = $state<{ projectId: string; turnId: string; entryId: string; sessionKey: string } | null>(null);
-  /** Viewer target (file or diff), set by M2 parts. */
-  viewer = $state<
-    | null
-    | { kind: "file"; projectId: string; path: string }
-    | { kind: "diff"; projectId: string; turnId: string; paths: string[]; index: number; sessionKey: string }
-  >(null);
+  /**
+   * What the viewer shows: the active editor tab of the active project (file or diff). The
+   * editor store (stores/editor.svelte.ts) holds the tabs and registers as `viewerHost`. Setting
+   * a file opens it as a preview tab, a diff opens the diff tab, null hides the viewer.
+   */
+  get viewer(): ViewerTarget {
+    return this.viewerShown;
+  }
+  set viewer(v: ViewerTarget) {
+    if (this.viewerHost) this.viewerHost.setViewer(v);
+    else this.viewerShown = v;
+  }
+  private viewerShown = $state<ViewerTarget>(null);
+  viewerHost: ViewerHost | null = null;
+  /** For the editor store: the tab the viewer shows now. */
+  showViewer(v: ViewerTarget) {
+    this.viewerShown = v;
+  }
+  /** Editor tabs per project (stores/editor.svelte.ts), as saved. Kept apart from the rest of the state. */
+  editorSaved = $state<unknown>(null);
 
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   /** Open tabs per project root from the state file, until restoreTabs used them. */
@@ -247,6 +275,7 @@ class AppStore {
       this.planVisible = panels.plan;
       this.promptsVisible = panels.prompts;
       this.terminalVisible = panels.terminal;
+      this.editorSaved = raw?.editor ?? null;
       applyTheme(this.settings.theme);
       document.documentElement.style.setProperty("--read-size", `${this.settings.fontSize}px`);
       this.env = await api.envCheck();
@@ -332,6 +361,7 @@ class AppStore {
       settings: $state.snapshot(this.settings),
       filesVisible: this.filesVisible,
       layout: $state.snapshot(this.layout),
+      editor: $state.snapshot(this.editorSaved),
     };
     api.uiStateSave(st).catch(() => {});
   }
@@ -385,6 +415,7 @@ class AppStore {
   async closeProject(id: string) {
     const p = this.projects.find((x) => x.id === id);
     if (!p) return;
+    if (this.viewerHost && !(await this.viewerHost.canCloseProject(id))) return;
     this.saveNow();
     await api.projectClose(id).catch(() => {});
     for (const s of p.sessions) {

@@ -224,7 +224,7 @@ Gap we fill: one calm app built around reading and approving agent work, with a 
 - **Side bar** (left): Files or Sessions, open by default, Mod+B hides it. CLAUDE.md pinned at the top of Files when it exists.
 - **Panels move:** the session (agent pane or conversation), side bar, viewer, plan, prompts and terminal dock left, right, bottom or in the center, alone or as tabs. See "Panel docking (2026-11-13)" and "Session panel and Prompts (2026-11-14)" in section 10.
 - **Conversation** (center): max 760px wide, reads like a document. Tool calls show as one line ("Read src/main.rs"). Long conversations use a virtualized list.
-- **Viewer** (center, next to the conversation, with the Plan as a second tab): opens only when a file or diff is opened. Code in CodeMirror, markdown rendered, toggle to source. If the agent changes a file with unsaved edits: "Changed on disk. Reload / Keep mine".
+- **Viewer** (center, next to the conversation, with the Plan as a second tab): opens only when a file or diff is opened. Editor tabs (preview and kept tabs), breadcrumbs, find and replace. Code in CodeMirror, markdown rendered, toggle to source. If the agent changes a file with unsaved edits: "This file changed on disk. Keep mine / Load from disk"; without unsaved edits it reloads. See "Editor basics (2026-11-15)" in section 10.
 - **Terminal:** bottom drawer, one terminal in v1, hidden until opened (Mod+`).
 
 ### Message box
@@ -293,9 +293,13 @@ Mod is Ctrl on Windows and Linux, Cmd on macOS.
 
 | Action | Key |
 |---|---|
-| Command palette | Mod+K |
-| Open file | Mod+P |
-| Search in files | Mod+Shift+F |
+| Command palette | Mod+K, Mod+Shift+P |
+| Open file (Quick open, "name:12" for a line, ":12" in the open file) | Mod+P |
+| Search in files (Search panel) | Mod+Shift+F |
+| Save, Save all | Mod+S, Mod+Alt+S (or "Save all" in the palette) |
+| Close editor tab, reopen the last closed | Mod+W, Mod+Shift+T |
+| Previous or next editor tab | Ctrl+Page Up, Ctrl+Page Down (focus in the viewer; Ctrl on every OS) |
+| Find, replace, go to line in the open file | Mod+F, Mod+H, Mod+G |
 | Run plan | Mod+Enter (empty message box) |
 | Discard plan | D (card focused) |
 | Stop agent | Mod+. (and Esc when nothing is open). Kills the process tree if it has not stopped after 3 s |
@@ -817,6 +821,31 @@ Verified on this machine (Windows 11, Claude Code 2.1.325):
 - Live, ignored: `real_claude_resume` starts the Claude TUI in `target/resume-live`, the test types one short prompt, reads the new transcript name for the session id (test only), then starts `claude --resume <id>`: the TUI starts with the earlier prompt and answer on screen and no error. `claude --resume <unknown id>` prints "No conversation found with session ID: ..." and exits with code 1 after 14 s. Run it outside a Claude Code session: inside one, the session's variables (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`) make the test's Claude a child session without its own transcript. Some runs under load did not draw the TUI within 40 s; the next run passed.
 
 Not verified: the app window (dormant tabs, the restart line, the panels at start, the chat cards after a real session/load replay), Codex and Gemini CLI resume (not installed), macOS and Linux.
+
+### Editor basics (2026-11-15)
+
+The owner's goal: "Eventually full features of any developer IDE UX." This batch adds the editor basics: tabs, unsaved changes, find and replace, quick open, search in files and breadcrumbs.
+
+| Decision | Why |
+|---|---|
+| Editor tabs in the viewer, VS Code style (`stores/editor.svelte.ts`, `EditorTabs.svelte`). A single click in the file tree opens a preview tab (italic name) that the next preview replaces. A double click, an edit, a drag, or Enter or Space in the tree keeps it open. A tab shows the file icon, the name (with as many parent folders as it takes when names clash), a dot for unsaved changes and a close button. Middle click closes. Drag reorders (`lib/reorder`). The tab menu (right click, Shift+F10, the menu key): Close, Close others, Close to the right, Close saved, Copy path, Copy relative path, Show in file tree, Keep open. The turn review (diff) is one more tab, replaced by the next review | Owner request |
+| `app.viewer` stays the one place the rest of the app reads and sets. It is now a getter and setter: the editor store registers as `app.viewerHost`; setting a file opens it as a preview tab, a diff opens the diff tab, null hides the viewer (the tabs stay). Existing callers did not change | Small change in `app.svelte.ts`, no import cycle |
+| Each open file keeps its CodeMirror state while its tab is hidden (undo history, cursor). The editor view swaps states (`view.setState`); shared extensions find the component through a WeakMap, so a cached state also works after the editor remounts | Undo per file, as in other editors |
+| Open tabs, the active tab, recent files and cursor and scroll position per file are saved per project root in a separate field `editor` of the state file (`app.editorSaved`). The diff tab is not saved | Kept apart from the session restore work |
+| Unsaved changes: a dot on the tab, Mod+S saves, Mod+Alt+S or "Save all" in the palette saves every file. Closing an unsaved tab, closing the project or closing the window asks: Save, Do not save, Cancel (`SaveDialog.svelte`). The window uses `onCloseRequested`, which needs `core:window:allow-destroy` | Nothing destructive without confirmation |
+| Mod+K S (VS Code's Save all) is not used: Mod+K opens the palette. Mod+Alt+S checks the key, so AltGr+S on Polish and similar layouts still types its letter | Mod+K is the palette since M3 |
+| A file that changes on disk: without unsaved edits it reloads without a message, with the smallest text change, so the cursor and scroll stay. With unsaved edits a bar says so and offers "Keep mine" and "Load from disk" ("Close file" when it was deleted) | Owner request. The agent edits open files all the time |
+| Find and replace in the file: CodeMirror's search with the app's own panel (`lib/findPanel.ts`): match case, whole word, regular expression (Alt+C, Alt+W, Alt+R), "3 of 12", previous and next, Replace and Replace all. Mod+F, Mod+H, Mod+G (go to line; CodeMirror's Mod+G "find next" moves to F3). CodeMirror's own words come from the string catalog (`EditorState.phrases`) | One look across the app; every string in en.ts |
+| Quick open (Mod+P, `QuickOpen.svelte`): fuzzy search over `fs_all_files` (ignore rules apply), recent files first, Enter opens a kept tab, "name:12" opens at line 12, ":12" goes to line 12 in the open file. Mod+Shift+P also opens the palette, like VS Code; Mod+K stays | Owner request |
+| Search is a dock panel (id "search", `SearchPanel.svelte`, state in `stores/search.svelte.ts`). Default place: a tab in the side bar group, hidden until Mod+Shift+F (which takes a one-line editor selection as the query). Match case, whole word, regular expression, files to include and to exclude (comma separated globs; a glob without a slash matches at any depth, a folder matches what is in it; ignored files stay out). Results grouped by file with line previews and the matches marked (ranges from Rust, UTF-16), a click opens the file at the match | Owner request |
+| Replace all in files: the panel first lists the files and the number of matches (`fs_replace_preview`) and names files with unsaved editor changes. Before it writes, `fs_replace` takes a shadow repo snapshot (`refs/fi/replace/<id>/before`, `crates/core/src/replace.rs`). Undo writes each file back from the snapshot, but only files that still have the replaced text; others are kept and counted. A file the snapshot does not hold exactly keeps its old text in memory. Replace keeps line breaks (CRLF stays CRLF) and works line by line like the search. During a running turn the replaced files count as your edits | Reuses the snapshot mechanism; Undo never overwrites later edits |
+| Breadcrumbs above the editor (folder > folder > file). A click shows that part in the file tree (the side bar opens on Files, the folders above it open, the row is selected) | Owner request |
+
+Keys: Ctrl+Page Up and Page Down switch editor tabs only while the focus is in the viewer; Ctrl+Shift+Page Up and Page Down still move session tabs, and Ctrl+Tab still cycles sessions. No conflict found: neither the app nor CodeMirror used Ctrl+Page Up or Page Down. In a terminal or agent pane, Mod+W, Mod+S and Mod+G go to the program; Ctrl+Shift keys (Mod+Shift+T, Mod+Shift+F, Mod+Shift+P) still reach the app, as before.
+
+Verified: `npm run lint`, `npm test` (new tests: search options and globs, match ranges in UTF-16, long line previews, replace with CRLF and groups, Replace all and Undo against a real shadow repo with a file changed after the replace). In Edge headless (same engine as WebView2) with the Vite dev server and a mocked Tauri API (not committed): preview tabs and pinning from the tree, names with folders for two index.ts files, the unsaved dot, Mod+W asking Save / Do not save / Cancel, Mod+S, a dirty file changed on disk (bar, Load from disk), a clean hidden file reloading without a message, the find panel (counts, whole word, match case, Mod+H, Replace all), Mod+G, Ctrl+Page Up and Page Down with the focus kept in the text, middle click close, Mod+Shift+T, the tab menu, drag reorder, Quick open (recent first, "main:20", ":3"), the Search panel (grouped results, toggles, filters, click to open, Replace all preview with the unsaved warning, Undo), breadcrumbs revealing a folder, and tabs restored after a reload.
+
+Not verified: the Tauri window (window close prompt, `core:window:allow-destroy`), Mod+Shift+P as a real key press (headless Edge takes Ctrl+Shift+P for an InPrivate window; the app handler was checked with a DOM key event), macOS and Linux (Cmd+W may close the window through the default macOS menu), and Rust globs end to end in the UI (the mock does not filter by glob; the Rust tests do).
 
 ## 11. Open items
 
