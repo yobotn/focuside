@@ -149,6 +149,12 @@ export class PaneTerm {
     }
   }
 
+  /** Clears the screen and starts the TUI again (a fresh one after a failed resume). */
+  restart() {
+    this.term.reset();
+    this.start();
+  }
+
   onExit() {
     this.ptyId = null;
     this.exited = true;

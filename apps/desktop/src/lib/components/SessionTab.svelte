@@ -16,7 +16,7 @@
 
   const name = $derived(s.name || t("session.untitled"));
   const agent = $derived(app.agentName(s.agent));
-  const stateText = $derived(s.waiting ? t(`queue.${s.waiting}` as const) : s.busy ? t("conv.working") : "");
+  const stateText = $derived(s.waiting ? t(`queue.${s.waiting}` as const) : s.busy ? t("conv.working") : s.dormant ? t("session.selectToResume") : "");
   const title = $derived([name, s.mode === "pane" ? t("pane.name", { agent }) : agent, stateText].filter(Boolean).join(" . ") + "\n" + t("session.renameHint") + "\n" + t("session.moveHint"));
 
   function startRename() {
@@ -33,7 +33,7 @@
   }
 </script>
 
-<div class="tab" class:on={active} class:vertical data-key={s.key}>
+<div class="tab" class:on={active} class:vertical class:dormant={s.dormant} data-key={s.key}>
   {#if editing}
     <input
       bind:this={input}
@@ -147,6 +147,11 @@
   .state.waiting {
     background: var(--warn-line);
     box-shadow: none;
+  }
+  /* A restored tab whose agent has not started: a dashed dot ("Select to resume"). */
+  .dormant .state {
+    box-shadow: none;
+    border: 1px dashed var(--border-strong);
   }
   .close {
     position: absolute;

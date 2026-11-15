@@ -8,7 +8,7 @@
     "dev": "npm --prefix apps/desktop run tauri:dev",
     "build": "npm --prefix apps/desktop run tauri:build",
     "icons": "node scripts/build-icons.mjs",
-    "test": "cargo test --workspace",
+    "test": "cargo test --workspace && node --test scripts/restore.test.mjs",
     "spike": "cargo run -q -p focuside-spike --",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all --check && node scripts/text-lint.mjs && node scripts/i18n-check.mjs && node scripts/check-bundle.mjs && npm --prefix apps/desktop run check",
     "lint:text": "node scripts/text-lint.mjs"

@@ -14,7 +14,7 @@ FocusIDE is a Tauri 2 desktop app. It starts an ACP coding agent (Claude Code th
 | `crates/spike` | Command line tool used to test ACP behavior without the UI |
 | `apps/desktop/src-tauri` | Tauri app: commands, chat sessions (`session.rs`), agent panes (`pane.rs`), turn recording (`turn_recorder.rs`), turns, watcher, PTYs |
 | `apps/desktop/src` | Svelte 5 UI. Stores in `lib/stores`, components in `lib/components`, strings in `lib/i18n/en.ts` |
-| `scripts` | Lint, i18n check, adapter download, icon build |
+| `scripts` | Lint, i18n check, adapter download, icon build, UI restore tests (`restore.test.mjs`) |
 | `site` | Static website for focuside.dev (GitHub Pages) |
 | `PLAN.md` | Product plan, decisions and build results. Read section 10 before larger changes |
 
@@ -27,7 +27,7 @@ npm run setup                    # install UI dependencies (once)
 node scripts/fetch-adapter.mjs   # download the pinned adapter binary for dev (once per OS); installed apps download it on first use
 npm run dev                      # run the app
 npm run lint                     # clippy -D warnings, rustfmt --check, text lint, i18n check, svelte-check
-npm test                         # cargo test --workspace
+npm test                         # cargo test --workspace, then the UI restore tests (node --test)
 npm run build                    # release installer
 node scripts/check-agents.mjs    # compare agent launch commands with the ACP registry (monthly)
 ```

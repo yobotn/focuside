@@ -60,6 +60,9 @@ export const en = {
   "session.stoppedResume": "Resume",
   "session.failedStart": "{agent} did not start: {error}",
   "session.otherRunning": "Another session is running here.",
+  "session.selectToResume": "Select to resume",
+  "session.notStarted": "The agent did not start.",
+  "session.loadFailed": "Could not load the earlier conversation. This is a new one.",
 
   // Waiting queue
   "queue.title": "Waiting for you",
@@ -250,6 +253,7 @@ export const en = {
   "pane.exitedShort": "The agent is not running.",
   "pane.exitedTerm": "The agent exited. Press Enter to start it again.",
   "pane.failed": "Could not start the agent: {error}",
+  "pane.resumeFailed": "Could not resume the last {agent} conversation. This is a new one.",
   "planPanel.title": "Plan",
   "planPanel.empty": "The plan shows here.",
   "planPanel.todos": "Todos",

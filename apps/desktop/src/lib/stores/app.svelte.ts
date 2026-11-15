@@ -1,6 +1,8 @@
 // App state: open projects, sessions, the active view, the waiting queue, settings, and the
 // actions the UI calls. Persisted through ui_state_save (recent projects, session names,
-// settings, prompt history).
+// settings, prompt history, and for a restart: the open projects, each project's session tabs
+// and active tab, the dock layout and which panels were shown). Restored tabs start their
+// agent only when first shown (wake).
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -24,6 +26,7 @@ import { MODE_SWITCH_PRESSES, MODE_SWITCH_WAIT, titleTopic } from "../tui";
 import { applyTheme, type Theme } from "../theme.svelte";
 import { DEFAULT_BOTTOM, defaultDock, legacyDock, normalizeDock, type Dock } from "../dock";
 import { updates } from "../updates.svelte";
+import { loadPanels, loadTabs, tabsOf, type SavedPanels, type SavedTabs } from "../restore";
 
 export interface Settings {
   theme: Theme;
@@ -105,6 +108,9 @@ interface Persisted {
   open: string[];
   active: string | null;
   sessions: Record<string, SavedSession[]>;
+  /** Open session tabs per project root. Missing in state saved before 2026-11-15. */
+  tabs: Record<string, SavedTabs>;
+  panels: SavedPanels;
   planFirst: boolean;
   history: string[];
   settings: Settings;
@@ -117,6 +123,8 @@ const defaults: Persisted = {
   open: [],
   active: null,
   sessions: {},
+  tabs: {},
+  panels: { plan: false, prompts: false, terminal: false },
   planFirst: true,
   history: [],
   settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [], planFolder: "" },
@@ -152,10 +160,12 @@ class AppStore {
   settings = $state<Settings>({ ...defaults.settings });
   filesVisible = $state(true);
   layout = $state<Layout>(defaultLayout());
+  /** The terminal drawer. Kept between runs; a new shell starts when it shows. */
   terminalVisible = $state(false);
-  /** The Plan panel. Opens when a plan arrives; not kept between runs. */
+  /** The Plan panel. Opens when a plan arrives. Kept between runs (since 2026-11-15). */
   planVisible = $state(false);
-  /** The Prompts panel (PromptsPanel.svelte). The dock shows it while this is true. */
+  /** The Prompts panel (PromptsPanel.svelte). The dock shows it while this is true. Kept
+   * between runs. */
   promptsVisible = $state(false);
   /** The prompt the Prompts panel opens and scrolls to (a click on a dot of the pane strip). */
   promptsFocus = $state<{ sessionKey: string; id: string | null; seq: number } | null>(null);
@@ -179,6 +189,10 @@ class AppStore {
   >(null);
 
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Open tabs per project root from the state file, until restoreTabs used them. */
+  private savedTabs: Record<string, SavedTabs> = {};
+  /** Placeholder keys of restored sessions that have not started. */
+  private dormantSeq = 0;
   private sessionsByKey = new Map<string, Session>();
   private dataTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -228,6 +242,11 @@ class AppStore {
         await api.planFolderSet(this.settings.planFolder).catch(() => (this.settings.planFolder = ""));
       this.filesVisible = st.filesVisible;
       this.layout = loadLayout(raw?.layout as Record<string, unknown> | undefined);
+      this.savedTabs = loadTabs(raw?.tabs);
+      const panels = loadPanels(raw?.panels);
+      this.planVisible = panels.plan;
+      this.promptsVisible = panels.prompts;
+      this.terminalVisible = panels.terminal;
       applyTheme(this.settings.theme);
       document.documentElement.style.setProperty("--read-size", `${this.settings.fontSize}px`);
       this.env = await api.envCheck();
@@ -245,6 +264,9 @@ class AppStore {
       for (const info of opened) {
         if (info && !this.projects.some((p) => p.id === info.id)) this.projects.push({ ...info, sessions: [], activeKey: null });
       }
+      // Their session tabs come back without starting any agent; the active tab of the active
+      // project starts when it is activated below, the others when they are first shown.
+      await Promise.all(this.projects.map((p) => this.restoreTabs(p)));
       const startup = await api.startupPaths();
       for (const p of startup) await this.openPath(p);
       if (!startup.length && st.active) {
@@ -295,11 +317,16 @@ class AppStore {
       slots.forEach((at, n) => (list[at] = ordered[n]));
       this.savedSessions[p.root] = list.slice(0, 100);
     }
+    // Tabs of open projects only: a closed project opens with a new session next time.
+    const tabs: Record<string, SavedTabs> = {};
+    for (const p of this.projects) tabs[p.root] = tabsOf(p.sessions, p.activeKey);
     const st: Persisted = {
       recent: this.recent,
       open: this.projects.map((p) => p.root),
       active: this.active?.root ?? null,
       sessions: $state.snapshot(this.savedSessions),
+      tabs,
+      panels: { plan: this.planVisible, prompts: this.promptsVisible, terminal: this.terminalVisible },
       planFirst: this.planFirst,
       history: this.history.slice(-200),
       settings: $state.snapshot(this.settings),
@@ -349,6 +376,7 @@ class AppStore {
     this.activeId = id;
     const p = this.active;
     if (p && !p.sessions.length) this.newSession();
+    this.wakeActive();
     this.clearSeen();
     this.updateTitle();
     this.save();
@@ -463,56 +491,136 @@ class AppStore {
         m = choice;
       }
       if (this.active !== p) return;
-      // Claude panes: turn tracking (the focuside plugin) and Plan first (plan mode at start).
-      const claudePane = m === "pane" && agent === "claude";
-      const hooks = claudePane && this.settings.claudeHooks;
-      const planFirst = claudePane && this.planFirst;
-      const brief = hooks && this.settings.claudeBrief;
-      const planFolder = claudePane && this.settings.planFolder ? this.settings.planFolder : null;
-      const key =
-        m === "pane"
-          ? await api.sessionStart(p.id, null, agent, this.settings.agentCommand, "pane", hooks, planFirst, brief, planFolder)
-          : await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
-      const s = new Session(key, p.id, p.root, resume);
+      // The saved data first, so a resumed pane knows whether it had a conversation.
+      const data = resume ? await api.sessionDataLoad(p.id, resume.acpId).catch(() => null) : null;
+      if (this.active !== p) return;
+      const s = new Session("", p.id, p.root, resume);
       s.agent = agent;
+      s.agentLabel = this.agentName(agent);
       s.mode = m;
-      s.status = "starting";
-      s.replaying = !!resume && m === "chat";
-      s.panePlan = planFirst;
-      if (m === "pane" && !resume) {
-        // A pane has no ACP session id. FocusIDE's own id lets the sessions list reopen it.
-        s.acpId = `pane-${key}`;
-      }
+      s.onData = () => this.saveSessionData(s);
+      s.loadData(data);
       if (!resume) {
         // A generic name until a prompt or the agent's title names the session.
         s.name = this.nextSessionName(p);
         s.generic = true;
       }
-      s.onData = () => this.saveSessionData(s);
-      if (resume) {
-        const data = await api.sessionDataLoad(p.id, resume.acpId).catch(() => null);
-        s.loadData(data);
+      const key = await this.startAgent(p, s, resume);
+      if (m === "pane" && !resume) {
+        // A pane has no ACP session id. FocusIDE's own id lets the sessions list reopen it.
+        s.acpId = `pane-${key}`;
       }
-      this.sessionsByKey.set(key, s);
       p.sessions.push(s);
       p.activeKey = key;
-      this.sessionsByKey.set(key, p.sessions[p.sessions.length - 1]);
       this.updateTitle();
     } catch (e) {
-      const msg = errText(e);
-      if (msg === "missing:agent") {
-        const id = resume?.agent ?? agentId ?? this.settings.agent;
-        if (!this.agents.length) await this.loadAgents();
-        const info = this.agents.find((a) => a.id === id);
-        this.flash(
-          id === "custom" ? t("agent.customMissing") : t("agent.missing", { name: this.agentName(id), install: info?.install ?? "" }),
-          "error",
-        );
-      } else if (msg.startsWith("missing:")) {
-        if (msg === "missing:adapter") this.adapterWaiting = { resume, agentId };
-        this.env = await api.envCheck();
-      }
-      else this.flash(msg, "error");
+      const msg = await this.startError(e, resume, agentId);
+      if (msg) this.flash(msg, "error");
+    }
+  }
+
+  /**
+   * Starts the agent of `s` in Rust and gives `s` its key. A pane resumes its agent's own
+   * conversation when the id is known (`agentSession`); a chat session loads its ACP session
+   * (`acpId`, session/load). Throws what session_start throws.
+   */
+  private async startAgent(p: Project, s: Session, resume?: SavedSession | null): Promise<string> {
+    const agent = s.agent;
+    const m = s.mode;
+    // Claude panes: turn tracking (the focuside plugin) and Plan first (plan mode at start).
+    const claudePane = m === "pane" && agent === "claude";
+    const hooks = claudePane && this.settings.claudeHooks;
+    const planFirst = claudePane && this.planFirst;
+    const brief = hooks && this.settings.claudeBrief;
+    const planFolder = claudePane && this.settings.planFolder ? this.settings.planFolder : null;
+    const key =
+      m === "pane"
+        ? await api.sessionStart(p.id, resume ? s.agentSession : null, agent, this.settings.agentCommand, "pane", hooks, planFirst, brief, planFolder)
+        : await api.sessionStart(p.id, resume?.acpId ?? null, agent, this.settings.agentCommand);
+    if (s.key) this.sessionsByKey.delete(s.key);
+    if (s.key && p.activeKey === s.key) p.activeKey = key;
+    s.key = key;
+    this.sessionsByKey.set(key, s);
+    s.status = "starting";
+    s.error = null;
+    s.replaying = !!resume && m === "chat";
+    s.panePlan = planFirst;
+    // A pane that had a conversation should resume it; if it starts fresh, one line says so.
+    s.expectResume = !!resume && m === "pane" && (!!s.agentSession || s.prompts.length > 0);
+    return key;
+  }
+
+  /** The text for an error from session_start, or null when the UI shows it another way (the
+   * environment banner, the adapter download). */
+  private async startError(e: unknown, resume?: SavedSession | null, agentId?: string): Promise<string | null> {
+    const msg = errText(e);
+    if (msg === "missing:agent") {
+      const id = resume?.agent ?? agentId ?? this.settings.agent;
+      if (!this.agents.length) await this.loadAgents();
+      const info = this.agents.find((a) => a.id === id);
+      return id === "custom" ? t("agent.customMissing") : t("agent.missing", { name: this.agentName(id), install: info?.install ?? "" });
+    }
+    if (msg.startsWith("missing:")) {
+      if (msg === "missing:adapter") this.adapterWaiting = { resume: resume ?? undefined, agentId };
+      this.env = await api.envCheck();
+      return null;
+    }
+    return msg;
+  }
+
+  /**
+   * Puts back the session tabs a project had open when the app closed, in their order, with
+   * their names, plan versions, prompts and changes. No agent starts here: each tab waits
+   * ("Select to resume") until it is first shown (wake). Sessions the user closed are not in
+   * the list, so they never start.
+   */
+  private async restoreTabs(p: Project) {
+    const tabs = this.savedTabs[p.root];
+    delete this.savedTabs[p.root];
+    if (!tabs?.ids.length) return;
+    const saved = this.savedSessions[p.root] ?? [];
+    const restored: Session[] = [];
+    for (const id of tabs.ids) {
+      const sv = saved.find((x) => x.acpId === id);
+      if (!sv || p.sessions.some((s) => s.acpId === id)) continue;
+      const s = new Session(`wait-${++this.dormantSeq}`, p.id, p.root, sv);
+      s.agentLabel = this.agentName(s.agent);
+      s.dormant = true;
+      s.restore = sv;
+      s.onData = () => this.saveSessionData(s);
+      restored.push(s);
+    }
+    await Promise.all(restored.map(async (s) => s.loadData(await api.sessionDataLoad(p.id, s.acpId!).catch(() => null))));
+    for (const s of restored) {
+      this.sessionsByKey.set(s.key, s);
+      p.sessions.push(s);
+    }
+    const active = p.sessions.find((s) => s.acpId === tabs.active) ?? p.sessions[0];
+    if (active && !p.activeKey) p.activeKey = active.key;
+  }
+
+  /** Starts the agent of the active session when it is a restored tab that waits. */
+  private wakeActive() {
+    const s = this.session;
+    if (s?.dormant) this.wake(s);
+  }
+
+  /** Starts a restored session's agent: a pane resumes its conversation, a chat session loads
+   * its history. On an error the tab keeps waiting and shows the error with "Resume". */
+  async wake(s: Session) {
+    if (!s.dormant || s.waking) return;
+    const p = this.projects.find((x) => x.id === s.projectId);
+    if (!p) return;
+    s.waking = true;
+    s.error = null;
+    try {
+      await this.startAgent(p, s, s.restore);
+      s.dormant = false;
+      this.updateTitle();
+    } catch (e) {
+      s.error = (await this.startError(e, s.restore, s.agent)) ?? t("session.notStarted");
+    } finally {
+      s.waking = false;
     }
   }
 
@@ -609,6 +717,7 @@ class AppStore {
         this.activeId = p.id;
       }
     }
+    this.wakeActive();
     this.clearSeen();
     this.updateTitle();
     this.save();
@@ -669,7 +778,9 @@ class AppStore {
     p.sessions = p.sessions.filter((s) => s.key !== key);
     this.sessionsByKey.delete(key);
     if (p.activeKey === key) p.activeKey = p.sessions[p.sessions.length - 1]?.key ?? null;
+    if (p.id === this.activeId) this.wakeActive();
     this.updateTitle();
+    this.save();
   }
 
   renameSession(s: Session, name: string) {
@@ -711,7 +822,12 @@ class AppStore {
       s.replaying = false;
       this.save();
     }
-    if (e.kind === "turn_ended" || e.kind === "pane_started") this.save();
+    if (e.kind === "turn_ended" || e.kind === "pane_started" || e.kind === "pane_session") this.save();
+    // A resumed pane that failed at once: start a fresh TUI (Rust dropped the id).
+    if (e.kind === "pane_exited" && e.resumeFailed) {
+      paneTerms.find(s.key)?.restart();
+      this.save();
+    }
     if (w !== "none" && w) this.notifyWaiting(s, w);
     this.clearSeen();
     this.updateTitle();
@@ -838,7 +954,8 @@ class AppStore {
     if (!s) return;
     for (const e of s.entries) if ((e.t === "plan" || e.t === "changes") && e.turnId === target.turnId) e.undo = undo;
     for (const p of s.prompts) if (p.turnId === target.turnId) p.undo = undo;
-    if (s.prompts.some((p) => p.turnId === target.turnId)) this.saveSessionData(s);
+    // The undo state of prompts and changes cards is kept in app data.
+    this.saveSessionData(s);
   }
 
   entryOf(target: { entryId: string; sessionKey: string }) {

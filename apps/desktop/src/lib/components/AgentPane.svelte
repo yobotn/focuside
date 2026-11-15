@@ -56,6 +56,8 @@
   const status = $derived.by(() => {
     if (pane?.exited || (!session.paneAlive && session.status === "ready")) return { text: t("pane.exited", { agent: name }), tone: "muted" };
     if (!session.paneAlive) return { text: t("session.starting", { agent: name }), tone: "muted" };
+    // Shown until the first prompt in the new conversation.
+    if (session.resumeFailed) return { text: t("pane.resumeFailed", { agent: name }), tone: "warn" };
     if (session.tracking === "otherRunning")
       return {
         text: session.untrackedBy ? t("pane.notTracked", { name: session.untrackedBy }) : t("pane.notTrackedOther"),

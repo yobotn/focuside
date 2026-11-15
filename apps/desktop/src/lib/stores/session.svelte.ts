@@ -2,6 +2,7 @@
 // live scope guard. Fed by `session` events from Rust.
 import type { SessionEvent } from "../api";
 import { t } from "../i18n";
+import { hasChanges, loadTurns, MAX_TURNS, placeTurns, turnsOf, type SavedTurn } from "../restore";
 import type {
   AgentCommand,
   ConfigOption,
@@ -73,6 +74,9 @@ export interface SavedSession {
   titled?: boolean;
   /** The name is still "Session N". */
   generic?: boolean;
+  /** Pane: the agent's own session id, from its hook events. A restored pane resumes it
+   * (for example `claude --resume <id>`, see pane.rs). */
+  agentSession?: string;
 }
 
 /** What a session keeps in app data between runs (session_data.rs). */
@@ -81,6 +85,8 @@ export interface SessionData {
   planVersions: PlanVersion[];
   /** Pane prompts. Chat prompts come from the conversation. */
   prompts: PromptTurn[];
+  /** The changes cards of the session. Missing in data saved before 2026-11-15. */
+  turns?: SavedTurn[];
 }
 
 const MAX_VERSIONS = 100;
@@ -96,11 +102,15 @@ export type SessionMode = "chat" | "pane";
 export type Tracking = "off" | "on" | "otherRunning" | "error" | "waiting";
 
 export class Session {
-  key: string;
+  /** Rust's session key. A restored session that has not started yet has a placeholder key,
+   * which changes when it starts (see `dormant`). */
+  key = $state("");
   projectId: string;
   root: string;
   acpId = $state<string | null>(null);
   agent = "claude";
+  /** The agent's display name ("Claude"), set by the app. */
+  agentLabel = "";
   /** The agent has a plan mode, so "Plan first" can work. */
   planMode = $state(true);
   /** Why Claude did not start in chat mode: a Claude plan login, or not signed in at all. */
@@ -138,6 +148,23 @@ export class Session {
   untrackedBy = $state<string | null>(null);
   /** Called when the data in `data()` changed, so the app can save it. */
   onData: (() => void) | null = null;
+  /** Pane: the agent's own session id (hook events), kept so a restored pane resumes it. */
+  agentSession = $state<string | null>(null);
+  /** A tab restored at app start whose agent has not started. It starts when the tab is
+   * first shown ("Select to resume"). */
+  dormant = $state(false);
+  /** The dormant session is starting its agent. */
+  waking = $state(false);
+  /** What a dormant session starts from. */
+  restore: SavedSession | null = null;
+  /** Pane: the session had a conversation, so its TUI should resume it. When the pane starts
+   * fresh instead, the user is told (`resumeFailed`). */
+  expectResume = false;
+  /** Pane: the last conversation could not be resumed; this TUI is a new one. Cleared by the
+   * next prompt. */
+  resumeFailed = $state(false);
+  /** Chat: saved changes cards that wait for the replayed history (see placeTurns). */
+  private pendingTurns: SavedTurn[] = [];
   /** Pane: the agent's todo list (TodoWrite or the Task tools, from hooks). */
   paneTodos = $state<{ content: string; status: string }[]>([]);
   name = $state("");
@@ -186,6 +213,7 @@ export class Session {
       this.mode = saved.mode ?? "chat";
       this.titled = !!saved.titled;
       this.generic = !!saved.generic;
+      this.agentSession = saved.agentSession ?? null;
       this.fromSaved = true;
     }
   }
@@ -209,16 +237,42 @@ export class Session {
 
   /** The data kept in app data, or null when there is nothing to keep. */
   data(): SessionData | null {
-    if (!this.planVersions.length && !this.prompts.length) return null;
-    return { v: 1, planVersions: $state.snapshot(this.planVersions), prompts: $state.snapshot(this.prompts) };
+    const turns = this.savedTurns();
+    if (!this.planVersions.length && !this.prompts.length && !turns.length) return null;
+    return { v: 1, planVersions: $state.snapshot(this.planVersions), prompts: $state.snapshot(this.prompts), turns };
   }
 
-  /** Data saved in an earlier run. Unknown shapes are ignored. */
+  /** The changes cards with the user message each one belongs to. Turns that still wait for
+   * the replay are kept as they are. */
+  private savedTurns(): SavedTurn[] {
+    return [...this.pendingTurns, ...turnsOf(this.entries, (x) => $state.snapshot(x) as typeof x)].slice(-MAX_TURNS);
+  }
+
+  /** Data saved in an earlier run. Unknown shapes are ignored. Pane changes cards come back at
+   * once; chat ones wait for the replayed history (placeTurns). */
   loadData(d: unknown) {
     const v = d as Partial<SessionData> | null;
     if (!v || typeof v !== "object") return;
     if (Array.isArray(v.planVersions) && !this.planVersions.length) this.planVersions = v.planVersions.slice(-MAX_VERSIONS);
     if (Array.isArray(v.prompts) && !this.prompts.length) this.prompts = v.prompts.slice(-MAX_PROMPTS);
+    const turns = loadTurns(v.turns);
+    if (!turns.length || this.entries.some((e) => e.t === "changes")) return;
+    if (this.mode === "pane") {
+      for (const x of turns) this.entries.push({ t: "changes", id: nid(), turnId: x.turnId, result: x.result, undo: x.undo ?? null });
+    } else {
+      this.pendingTurns = turns;
+    }
+  }
+
+  /**
+   * Chat: puts the saved changes cards back into the replayed history, each after the user
+   * message it belongs to (by its place, checked against its text, else by its text). A card
+   * whose message is not found goes at the end.
+   */
+  placeTurns() {
+    const turns = this.pendingTurns;
+    this.pendingTurns = [];
+    placeTurns(this.entries, turns, nid);
   }
 
   private changed() {
@@ -333,6 +387,7 @@ export class Session {
       mode: this.mode,
       titled: this.titled,
       generic: this.generic,
+      ...(this.agentSession ? { agentSession: this.agentSession } : {}),
     };
   }
 
@@ -402,6 +457,10 @@ export class Session {
           this.planMode = modes.some((m) => m.id === "plan") || values.includes("plan");
         }
         if (Array.isArray(e.configOptions)) this.configOptions = e.configOptions;
+        // A restored conversation: the history arrived before "ready" (session/load). The
+        // changes cards go back after their messages.
+        if (this.replaying && e.resumed === false) this.note(t("session.loadFailed"), "warn");
+        this.placeTurns();
         return "none";
       case "failed":
         this.status = "failed";
@@ -615,6 +674,8 @@ export class Session {
   }
 
   private onTurnEnded(r: TurnResult): Waiting | "none" {
+    // The changes cards are kept in app data (saved shortly after, see app.saveSessionData).
+    if (hasChanges(r)) this.changed();
     this.running = false;
     this.stopping = false;
     this.thinking = false;
@@ -696,12 +757,20 @@ export class Session {
         // A new TUI starts in its launch mode: plan with Plan first, else unknown until a hook
         // event or the status line reports it.
         this.paneMode = this.panePlan ? "plan" : null;
+        // A restored conversation that started fresh: no id was known for it.
+        if (this.expectResume && e.canResume && !e.resumed) this.failResume();
+        this.expectResume = false;
         break;
       case "pane_exited":
         this.paneAlive = false;
         this.paneWorking = false;
         this.tracking = "off";
         this.turnId = null;
+        // The resumed TUI exited with an error at once. The app starts a fresh one.
+        if (e.resumeFailed) this.failResume();
+        break;
+      case "pane_session":
+        if (typeof e.agentSession === "string") this.agentSession = e.agentSession;
         break;
       case "hooks_live":
         this.hooksLive = true;
@@ -728,6 +797,7 @@ export class Session {
         this.addTodoVersion(this.paneTodos);
         break;
       case "pane_prompt": {
+        this.resumeFailed = false;
         const text = typeof e.text === "string" ? e.text : "";
         this.prompts.push({ id: nid(), at: Date.now(), prompt: text, answer: null, turnId: null, result: null, undo: null });
         if (this.prompts.length > MAX_PROMPTS) this.prompts.splice(0, this.prompts.length - MAX_PROMPTS);
@@ -782,8 +852,9 @@ export class Session {
         this.tracking = "off";
         this.turnId = null;
         this.updated = Date.now();
-        if (r.hasSnapshot && (r.changes?.files.length || r.changes?.generated.length)) {
+        if (hasChanges(r)) {
           this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
+          this.changed();
         }
         const turn = this.prompts.findLast((x) => x.turnId === r.turnId);
         if (turn) {
@@ -796,6 +867,13 @@ export class Session {
       }
     }
     return "none";
+  }
+
+  /** Pane: the last conversation did not come back; this TUI is a new one. One line says so. */
+  private failResume() {
+    this.agentSession = null;
+    this.resumeFailed = true;
+    this.note(t("pane.resumeFailed", { agent: this.agentLabel || this.agent }), "warn");
   }
 
   /** Out-of-plan rows for a plan card or a changes card, from the real disk diff. */

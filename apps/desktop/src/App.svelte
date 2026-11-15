@@ -80,7 +80,7 @@
       const items: ListItem[] = live.map((s) => ({
         id: s.key,
         label: s.name || t("session.untitled"),
-        detail: s.running ? t("conv.working") : s.waiting ? t(`queue.${s.waiting}` as any) : "",
+        detail: s.running ? t("conv.working") : s.waiting ? t(`queue.${s.waiting}` as any) : s.dormant ? t("session.selectToResume") : "",
         tone: s.waiting ? "warn" : undefined,
         run: () => app.showSession(s.key),
       }));
@@ -369,7 +369,17 @@
            moves this element, so the pane's terminal and its screen stay as they are. -->
       <main class="host session" {@attach dockHost("session")}>
         <IdentityBar />
-        {#if session && session.mode === "pane"}
+        {#if session?.dormant}
+          <!-- A restored tab: its agent starts when the tab is shown (app.wake). -->
+          <div class="dormant">
+            {#if session.error && !session.waking}
+              <p class="text-danger">{session.error}</p>
+              <button class="btn" onclick={() => session && app.wake(session)}>{t("session.resume")}</button>
+            {:else}
+              <p class="text-fg-muted">{t("session.starting", { agent: app.agentName(session.agent) })}</p>
+            {/if}
+          </div>
+        {:else if session && session.mode === "pane"}
           {#key session.key}<AgentPane {session} {project} />{/key}
         {:else if session}
           {#if session.status === "claudeAccess"}
@@ -488,6 +498,17 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+  .dormant {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    font-size: 13px;
+    text-align: center;
   }
   .toast {
     position: fixed;
