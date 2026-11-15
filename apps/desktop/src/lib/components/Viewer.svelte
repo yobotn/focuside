@@ -9,7 +9,9 @@
   import { formatSize } from "../editor";
   import { t } from "../i18n";
   import { keyLabel } from "../platform";
-  import { app, type Project } from "../stores/app.svelte";
+  import { untrack } from "svelte";
+  import { app, type GitDiff, type Project } from "../stores/app.svelte";
+  import { git as gitStore, gitDiffName } from "../stores/git.svelte";
   import type { FileVersions } from "../types";
   import { dock } from "../stores/dock.svelte";
   import { editor } from "../stores/editor.svelte";
@@ -72,11 +74,19 @@
       });
   });
 
-  async function loadDiff(turnId: string, p: string) {
-    diffError = null;
-    versions = null;
-    diffImages = null;
+  async function loadDiff(turnId: string, p: string, git?: GitDiff, orig?: string | null, quiet = false) {
+    if (!quiet) {
+      diffError = null;
+      versions = null;
+      diffImages = null;
+    }
     try {
+      if (git) {
+        // A git change (Git panel). Binary files show as binary, without image sides.
+        const r = await api.gitVersions(project.id, git.source, p, orig ?? null);
+        if (p === path && JSON.stringify(r) !== JSON.stringify(versions)) versions = r;
+        return;
+      }
       const r = await api.fileVersions(project.id, turnId, p);
       if (r.binary && mediaKind(p) === "image") {
         const side = (after: boolean) =>
@@ -95,7 +105,19 @@
 
   $effect(() => {
     const d = diffTab;
-    if (d) loadDiff(d.turnId, d.paths[d.index]);
+    if (d) loadDiff(d.turnId, d.paths[d.index], d.git, d.git?.origs[d.index]);
+  });
+
+  // A git diff of the work tree or the index follows the repository: edits on disk, stage and
+  // unstage. It reloads in place, so the view does not flash.
+  let lastGit = -1;
+  $effect(() => {
+    const v = gitStore.version;
+    untrack(() => {
+      const d = diffTab;
+      if (lastGit >= 0 && v !== lastGit && d?.git && d.git.source.kind !== "commit") loadDiff(d.turnId, d.paths[d.index], d.git, d.git.origs[d.index], true);
+    });
+    lastGit = v;
   });
 
   function step(d: number) {
@@ -171,13 +193,15 @@
     </div>
   {:else if diffTab}
     <div class="bar">
-      <span class="text-fg-muted">{t("viewer.diff")}</span>
+      <span class="text-fg-muted">{diffTab.git ? gitDiffName(diffTab.git) : t("viewer.diff")}</span>
       <span class="truncate font-medium" title={path}>{path}</span>
       <span class="flex-1"></span>
       <span class="text-fg-muted">{t("viewer.diffOf", { index: diffTab.index + 1, count: diffTab.paths.length })}</span>
       <button class="icon-btn" onclick={() => step(-1)} disabled={diffTab.index === 0} title="{t('viewer.prevFile')} (K)" aria-label={t("viewer.prevFile")}><CaretLeft size={14} /></button>
       <button class="icon-btn" onclick={() => step(1)} disabled={diffTab.index >= diffTab.paths.length - 1} title="{t('viewer.nextFile')} (J)" aria-label={t("viewer.nextFile")}><CaretRight size={14} /></button>
-      <button class="btn h-6" onclick={revertFile} title={t("undo.revertFile")}><ArrowCounterClockwise size={13} />{t("undo.revertFile")}</button>
+      {#if !diffTab.git}
+        <button class="btn h-6" onclick={revertFile} title={t("undo.revertFile")}><ArrowCounterClockwise size={13} />{t("undo.revertFile")}</button>
+      {/if}
     </div>
   {/if}
 

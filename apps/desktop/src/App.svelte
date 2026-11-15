@@ -18,6 +18,10 @@
   import SidePanel from "./lib/components/SidePanel.svelte";
   import Viewer from "./lib/components/Viewer.svelte";
   import SearchPanel from "./lib/components/SearchPanel.svelte";
+  import GitPanel from "./lib/components/GitPanel.svelte";
+  import GitConfirm from "./lib/components/GitConfirm.svelte";
+  import { git } from "./lib/stores/git.svelte";
+  import { api, errText, type GitBranch } from "./lib/api";
   import QuickOpen from "./lib/components/QuickOpen.svelte";
   import SaveDialog from "./lib/components/SaveDialog.svelte";
   import { editor, tabKey } from "./lib/stores/editor.svelte";
@@ -43,6 +47,7 @@
   onMount(() => {
     app.init();
     editor.init();
+    git.init();
     const un = getCurrentWebview().onDragDropEvent((e) => {
       if (e.payload.type === "drop") {
         // Folders open as projects. Files are left to the message box (images).
@@ -138,6 +143,8 @@
       { id: "file", label: t("cmd.openFile"), hint: keyLabel("Mod+P"), run: () => (app.overlay = "openFile") },
       { id: "search", label: t("cmd.search"), hint: keyLabel("Mod+Shift+F"), run: () => openSearch() },
       { id: "saveAll", label: t("cmd.saveAll"), hint: keyLabel("Mod+Alt+S"), run: () => editor.saveAll() },
+      { id: "git", label: t("cmd.git"), hint: "Ctrl+Shift+G", run: () => git.show() },
+      ...gitCommands(),
       { id: "files", label: t("cmd.files"), hint: keyLabel("Mod+B"), run: () => dock.toggle("side") },
       { id: "term", label: t("cmd.terminal"), hint: keyLabel("Mod+`"), run: () => dock.toggle("terminal") },
       { id: "planPanel", label: t("cmd.planPanel"), run: () => dock.show("plan") },
@@ -183,6 +190,55 @@
     if (project) items.push({ id: "close", label: t("cmd.closeProject"), run: () => app.closeProject(project.id) });
     return items;
   });
+
+  /** Palette commands for the project's git repository, when it is one. */
+  function gitCommands(): ListItem[] {
+    const st = git.projectId === project?.id ? git.status : null;
+    if (!st?.repo) return [];
+    return [
+      { id: "gitCommit", label: t("cmd.gitCommit"), run: () => git.commit() },
+      { id: "gitPull", label: t("cmd.gitPull"), run: () => git.pull() },
+      { id: "gitPush", label: t("cmd.gitPush"), run: () => git.push() },
+      { id: "gitBranch", label: t("cmd.gitBranch"), run: () => (app.overlay = "branch") },
+    ];
+  }
+
+  // Branch quick pick: local branches, then remote branches without a local one of the same
+  // name. A name that matches no branch can be created.
+  let branches = $state<GitBranch[]>([]);
+  $effect(() => {
+    const id = project?.id;
+    if (app.overlay !== "branch" || !id) return;
+    branches = [];
+    api
+      .gitBranches(id)
+      .then((list) => {
+        if (app.overlay === "branch") branches = list;
+      })
+      .catch((e) => {
+        app.overlay = null;
+        app.flash(errText(e), "error");
+      });
+  });
+  const branchItems = $derived.by<ListItem[]>(() => {
+    const local = new Set(branches.filter((b) => !b.remote).map((b) => b.name));
+    return branches
+      .filter((b) => !b.remote || !local.has(b.name.slice(b.name.indexOf("/") + 1)))
+      .map((b) => ({
+        id: (b.remote ? "r:" : "l:") + b.name,
+        label: b.name,
+        detail: b.current ? t("git.current") : b.remote ? t("git.remoteBranch") : (b.upstream ?? ""),
+        tone: b.current ? ("muted" as const) : undefined,
+        run: () => {
+          if (!b.current) git.switchTo(b.name, b.remote);
+        },
+      }));
+  });
+  function branchExtra(q: string): ListItem[] {
+    const name = q.trim();
+    if (!name || branches.some((b) => b.name === name)) return [];
+    return [{ id: "create", label: t("git.createBranch", { name }), run: () => git.createBranch(name) }];
+  }
 
   /** Palette commands for the editor tabs, when the project has some. */
   function editorCommands(): ListItem[] {
@@ -312,6 +368,8 @@
     else if (mod(e) && e.shiftKey && !e.altKey && k === "p") app.overlay = app.overlay === "palette" ? null : "palette";
     else if (mod(e) && !e.shiftKey && k === "p") app.overlay = "openFile";
     else if (mod(e) && e.shiftKey && k === "f") openSearch();
+    // Ctrl+Shift+G on every OS, as in VS Code: the Git panel.
+    else if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && k === "g") git.show();
     // Editor tabs: Mod+W closes, Mod+Shift+T reopens, Mod+S saves, Mod+Alt+S saves all.
     else if (mod(e) && !e.shiftKey && !e.altKey && k === "w") {
       const w = editor.get(project?.id);
@@ -459,6 +517,7 @@
       </main>
       {#if visible("side")}<div class="host" {@attach dockHost("side")}><SidePanel {project} /></div>{/if}
       {#if visible("search")}<div class="host" {@attach dockHost("search")}><SearchPanel {project} /></div>{/if}
+      {#if visible("git")}<div class="host" {@attach dockHost("git")}><GitPanel {project} /></div>{/if}
       {#if visible("viewer")}<div class="host" {@attach dockHost("viewer")}><Viewer {project} /></div>{/if}
       {#if visible("plan")}<div class="host" {@attach dockHost("plan")}><PlanPanel /></div>{/if}
       {#if visible("prompts")}<div class="host" {@attach dockHost("prompts")}><PromptsPanel /></div>{/if}
@@ -476,6 +535,8 @@
   <ListOverlay placeholder={t("session.new")} items={newItems} empty={t("palette.empty")} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "palette"}
   <ListOverlay placeholder={t("palette.placeholder")} items={paletteItems} onclose={() => (app.overlay = null)} />
+{:else if app.overlay === "branch" && project}
+  <ListOverlay placeholder={t("git.branchPlaceholder")} items={branchItems} extra={branchExtra} empty={t("git.noBranches")} mono onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "openFile" && project}
   <QuickOpen {project} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "model"}
@@ -494,6 +555,10 @@
 
 {#if editor.ask}
   <SaveDialog ask={editor.ask} />
+{/if}
+
+{#if git.ask}
+  <GitConfirm ask={git.ask} />
 {/if}
 
 {#if app.chatAsk}

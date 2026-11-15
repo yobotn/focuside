@@ -4,6 +4,7 @@ pub mod acp;
 pub mod adapter_download;
 pub mod agent;
 pub mod files;
+pub mod git;
 pub mod plan;
 pub mod proc;
 pub mod project;

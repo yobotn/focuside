@@ -10,7 +10,7 @@ import type { EditorView } from "@codemirror/view";
 import { untrack } from "svelte";
 import { api, errText, type FileContent } from "../api";
 import { t } from "../i18n";
-import { app, type Project, type ViewerHost, type ViewerTarget } from "./app.svelte";
+import { app, type GitDiff, type Project, type ViewerHost, type ViewerTarget } from "./app.svelte";
 import { dock } from "./dock.svelte";
 
 /** Cursor and scroll position: selection anchor and head, and the first visible position. */
@@ -21,7 +21,8 @@ export interface ViewPos {
 }
 
 export type FileTab = { kind: "file"; path: string; preview: boolean };
-export type DiffTab = { kind: "diff"; turnId: string; paths: string[]; index: number; sessionKey: string; preview: boolean };
+/** The diff tab: a turn's changes, or a git change when `git` is set (Git panel). */
+export type DiffTab = { kind: "diff"; turnId: string; paths: string[]; index: number; sessionKey: string; preview: boolean; git?: GitDiff };
 export type Tab = FileTab | DiffTab;
 
 export const DIFF_KEY = "\u0000diff";
@@ -231,7 +232,7 @@ class EditorStore implements ViewerHost {
     let next: ViewerTarget = null;
     if (p && tab?.kind === "file") next = { kind: "file", projectId: p.id, path: tab.path };
     else if (p && tab?.kind === "diff")
-      next = { kind: "diff", projectId: p.id, turnId: tab.turnId, paths: tab.paths, index: tab.index, sessionKey: tab.sessionKey };
+      next = { kind: "diff", projectId: p.id, turnId: tab.turnId, paths: tab.paths, index: tab.index, sessionKey: tab.sessionKey, git: tab.git };
     const cur = app.viewer;
     if (JSON.stringify(cur) !== JSON.stringify(next)) app.showViewer(next);
   }
@@ -265,10 +266,10 @@ class EditorStore implements ViewerHost {
     if (opts.line) this.jump = { projectId, path, line: opts.line, col: opts.col, len: opts.len, seq: ++this.seq };
   }
 
-  openDiff(projectId: string, d: { turnId: string; paths: string[]; index: number; sessionKey: string }) {
+  openDiff(projectId: string, d: { turnId: string; paths: string[]; index: number; sessionKey: string; git?: GitDiff }) {
     const w = this.get(projectId);
     if (!w) return;
-    const tab: DiffTab = { kind: "diff", turnId: d.turnId, paths: d.paths, index: d.index, sessionKey: d.sessionKey, preview: true };
+    const tab: DiffTab = { kind: "diff", turnId: d.turnId, paths: d.paths, index: d.index, sessionKey: d.sessionKey, preview: true, git: d.git };
     const i = w.index(DIFF_KEY);
     if (i >= 0) w.tabs[i] = tab;
     else {

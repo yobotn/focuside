@@ -199,15 +199,25 @@ pub fn watch(app: AppHandle, project: &Arc<Project>) {
         move |res: DebounceEventResult| {
             let Ok(events) = res else { return };
             let mut paths = BTreeSet::new();
+            let mut git = false;
             for ev in events {
                 let Ok(rel) = ev.path.strip_prefix(&root) else {
                     continue;
                 };
                 let rel = rel.to_string_lossy().replace('\\', "/");
-                if rel.is_empty() || rel == ".git" || rel.starts_with(".git/") {
+                if let Some(inner) = rel.strip_prefix(".git/") {
+                    git |= git_state_file(inner);
+                    continue;
+                }
+                if rel.is_empty() || rel == ".git" {
                     continue;
                 }
                 paths.insert(rel);
+            }
+            if git {
+                // A commit, a branch switch or a fetch from outside FocusIDE: the Git panel
+                // reads the status again.
+                let _ = app.emit("git-changed", json!({ "projectId": id }));
             }
             if paths.is_empty() {
                 return;
@@ -230,6 +240,18 @@ pub fn watch(app: AppHandle, project: &Arc<Project>) {
         }
         Err(e) => tracing::warn!("watcher: {e}"),
     }
+}
+
+/// Files in the project's `.git` folder that change with the status the Git panel shows: the
+/// index, HEAD, branches and tags, and the merge state. Lock files and objects do not count.
+fn git_state_file(inner: &str) -> bool {
+    if inner.ends_with(".lock") {
+        return false;
+    }
+    matches!(
+        inner,
+        "index" | "HEAD" | "packed-refs" | "FETCH_HEAD" | "MERGE_HEAD" | "ORIG_HEAD"
+    ) || inner.starts_with("refs/")
 }
 
 /// A project image as a data URL, for images in rendered markdown. Only common image types
@@ -270,4 +292,32 @@ pub async fn fs_media(
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("{e:#}"))?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::git_state_file;
+
+    #[test]
+    fn git_folder_changes_that_wake_the_git_panel() {
+        for f in [
+            "index",
+            "HEAD",
+            "refs/heads/main",
+            "packed-refs",
+            "FETCH_HEAD",
+            "MERGE_HEAD",
+        ] {
+            assert!(git_state_file(f), "{f}");
+        }
+        for f in [
+            "index.lock",
+            "refs/heads/main.lock",
+            "objects/ab/cdef",
+            "logs/HEAD",
+            "config",
+        ] {
+            assert!(!git_state_file(f), "{f}");
+        }
+    }
 }
