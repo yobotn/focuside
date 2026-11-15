@@ -256,9 +256,27 @@ impl Session {
             st.alive = true;
         }
         *self.conn.lock().unwrap() = Some(p.conn.clone());
-        let incoming = std::mem::replace(&mut p.incoming, tokio::sync::mpsc::unbounded_channel().1);
+        let mut incoming =
+            std::mem::replace(&mut p.incoming, tokio::sync::mpsc::unbounded_channel().1);
         let stderr = p.stderr.clone();
         *self.tree.lock().await = Some(p.tree);
+
+        // session/load sends the history as session/update notifications before its response,
+        // so they are in the queue now. They go to the UI before "ready", which ends the replay
+        // there (no plan versions, names or notifications from old turns). The first message of
+        // another kind, and all after it, wait for the read loop in their order.
+        let mut later = Vec::new();
+        while let Ok(msg) = incoming.try_recv() {
+            match msg {
+                Incoming::Notification { method, params }
+                    if method == "session/update" && later.is_empty() =>
+                {
+                    self.on_update(&params["update"]);
+                    self.emit("update", json!({ "update": params["update"] }));
+                }
+                other => later.push(other),
+            }
+        }
 
         self.emit(
             "ready",
@@ -273,19 +291,28 @@ impl Session {
         );
 
         let me = self.clone();
-        tauri::async_runtime::spawn(
-            async move { me.read_loop(incoming, generation, stderr).await },
-        );
+        tauri::async_runtime::spawn(async move {
+            me.read_loop(later, incoming, generation, stderr).await
+        });
         Ok(())
     }
 
     async fn read_loop(
         self: Arc<Self>,
+        first: Vec<Incoming>,
         mut incoming: tokio::sync::mpsc::UnboundedReceiver<Incoming>,
         generation: u64,
         stderr: Arc<Mutex<std::collections::VecDeque<String>>>,
     ) {
-        while let Some(msg) = incoming.recv().await {
+        let mut first = first.into_iter();
+        loop {
+            let msg = match first.next() {
+                Some(m) => m,
+                None => match incoming.recv().await {
+                    Some(m) => m,
+                    None => return,
+                },
+            };
             if self.generation.load(Ordering::SeqCst) != generation {
                 return;
             }
