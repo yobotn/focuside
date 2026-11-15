@@ -139,6 +139,8 @@ pub fn run() {
             commands::turn_redo,
             commands::turn_revert_file,
             commands::turn_file_versions,
+            commands::turn_file_diff,
+            commands::turn_undo_hunk,
             commands::turn_file_bytes,
             git::git_status,
             git::git_init,

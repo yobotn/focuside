@@ -108,3 +108,23 @@ test("pane turns and bad saved turns", () => {
   placeTurns(entries, loadTurns(viaJson(pane)), () => "n");
   assert.equal(entries.length, 1);
 });
+
+test("kept files of a turn survive a restart; old turns have none", () => {
+  const entries = [
+    { t: "user", id: "u1", text: "fix it" },
+    { t: "changes", id: "c1", turnId: "t1", result: result("t1", ["a.txt", "b.txt"]), undo: null, reviewed: ["a.txt"] },
+    { t: "changes", id: "c2", turnId: "t2", result: result("t2"), undo: null },
+  ];
+  const saved = viaJson(turnsOf(entries));
+  assert.deepEqual(saved[0].reviewed, ["a.txt"]);
+  assert.equal("reviewed" in saved[1], false);
+  const back = loadTurns([...saved, { ...saved[0], turnId: "t3", reviewed: ["x", 3] }]);
+  assert.deepEqual(back[0].reviewed, ["a.txt"]);
+  assert.equal(back[1].reviewed, undefined);
+  assert.deepEqual(back[2].reviewed, ["x"]);
+  const conv = [{ t: "user", id: "u1", text: "fix it" }];
+  let n = 0;
+  placeTurns(conv, back.slice(0, 2), () => `n${++n}`);
+  assert.deepEqual(conv[1].reviewed, ["a.txt"]);
+  assert.equal(conv[2].reviewed, undefined);
+});

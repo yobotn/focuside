@@ -26,6 +26,7 @@
     mono = false,
     extra,
     onclose,
+    onpick,
   }: {
     title?: string;
     placeholder?: string;
@@ -36,6 +37,8 @@
     /** Items built from the typed text, shown after the matches and not filtered (for example "Create branch"). */
     extra?: (query: string) => ListItem[];
     onclose: () => void;
+    /** Called with the item before it runs (the palette keeps recent commands). */
+    onpick?: (item: ListItem) => void;
   } = $props();
 
   let query = $state("");
@@ -64,6 +67,7 @@
     const it = shown[i];
     if (!it) return;
     onclose();
+    onpick?.(it);
     it.run();
   }
 

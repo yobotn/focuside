@@ -168,6 +168,7 @@
     if (fresh) loadLanguage(d.path);
     loadGitBase();
     editor.view = view;
+    editor.trackCursor(d.path, view.state);
     if (!applyJump()) {
       const top = Math.min(d.pos?.top ?? 0, view.state.doc.length);
       view.dispatch({ effects: EditorView.scrollIntoView(top, { y: "start" }) });
@@ -198,6 +199,7 @@
     hooks.set(view, {
       update: (u) => {
         if (!u.docChanged && !u.selectionSet) return;
+        if (doc && shown) editor.trackCursor(shown.path, u.state);
         if (doc && shown) {
           if (u.docChanged) {
             shown.text = u.state.doc.toString();

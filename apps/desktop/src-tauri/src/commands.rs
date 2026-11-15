@@ -631,9 +631,42 @@ pub async fn turn_revert_file(
     project_id: String,
     turn_id: String,
     path: String,
+    force: Option<bool>,
 ) -> Res<turns::UndoOutcome> {
     let p = project(&state, &project_id)?;
-    turns::revert_file(&p, &turn_id, &path)
+    ensure_free(&p)?;
+    turns::revert_file(&p, &turn_id, &path, force.unwrap_or(false))
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// One file of a turn for the review: both versions, the hunks and their state on disk.
+#[tauri::command]
+pub async fn turn_file_diff(
+    state: State<'_, AppState>,
+    project_id: String,
+    turn_id: String,
+    path: String,
+) -> Res<focuside_core::hunks::FileDiff> {
+    let p = project(&state, &project_id)?;
+    turns::file_diff(&p, &turn_id, &path)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Undo change: one hunk back to how it was before the turn. Rejects with "changedSince" when
+/// those lines changed after the turn.
+#[tauri::command]
+pub async fn turn_undo_hunk(
+    state: State<'_, AppState>,
+    project_id: String,
+    turn_id: String,
+    path: String,
+    index: usize,
+) -> Res<focuside_core::hunks::FileDiff> {
+    let p = project(&state, &project_id)?;
+    ensure_free(&p)?;
+    turns::undo_hunk(&p, &turn_id, &path, index)
         .await
         .map_err(|e| format!("{e:#}"))
 }

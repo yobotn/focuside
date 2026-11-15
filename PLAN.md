@@ -168,7 +168,7 @@ Gap we fill: one calm app built around reading and approving agent work, with a 
 - A "before undo" snapshot is taken first, so Undo can itself be undone from the palette.
 - The confirm dialog lists commands the turn ran (git commit, npm install, migrations) as "Not undone".
 - The next prompt to the agent starts with: "The user reverted all file changes from your last turn."
-- v1 offers Undo turn and revert one file. Revert one hunk comes in v2.
+- v1 offers Undo turn, Undo file and Undo change (one hunk). See "Review and status (2026-11-15)" in section 10.
 
 ### One running turn per project
 - v1 allows one running turn per project. Other sessions in the same project can plan. Their Run plan is disabled with "Another session is running here."
@@ -269,7 +269,7 @@ Gap we fill: one calm app built around reading and approving agent work, with a 
 +-------------------------------------------------------------------+
 ```
 
-- Review opens the diff viewer. J/K next or previous file. Revert one file from the viewer.
+- Review opens the review in the viewer: every file of the turn stacked, J/K next or previous change. Each row has Undo file and Keep (reviewed); "Keep all" marks the whole turn. See "Review and status (2026-11-15)" in section 10.
 
 ### Always know where you are
 - One window, rail of projects, identity bar, window title (above).
@@ -278,7 +278,8 @@ Gap we fill: one calm app built around reading and approving agent work, with a 
 - Warning if an agent runs in a different folder than the project.
 - **Waiting queue (Mod+J):** all sessions waiting for you, across all projects. Enter jumps there.
 - **Sessions list (Mod+E):** sessions for this project. Click to resume.
-- System notification only when a session in a project you are not looking at waits for you.
+- System notification when a session finishes or waits for you while FocusIDE is in the background (Settings > Notifications: never, in the background, always). The taskbar button flashes too.
+- **Status bar** (bottom): agent state of the active session, files changed in the session, cursor and language of the open file.
 
 ### First run
 - Check for `claude` on PATH, whether it is signed in, and `git` (needed for Undo turn).
@@ -294,6 +295,7 @@ Mod is Ctrl on Windows and Linux, Cmd on macOS.
 | Action | Key |
 |---|---|
 | Command palette | Mod+K, Mod+Shift+P |
+| Keyboard shortcuts (the list of all keys) | Mod+/ (in editable text Mod+/ stays toggle comment) |
 | Open file (Quick open, "name:12" for a line, ":12" in the open file) | Mod+P |
 | Search in files (Search panel) | Mod+Shift+F |
 | Save, Save all | Mod+S, Mod+Alt+S (or "Save all" in the palette) |
@@ -304,6 +306,9 @@ Mod is Ctrl on Windows and Linux, Cmd on macOS.
 | Discard plan | D (card focused) |
 | Stop agent | Mod+. (and Esc when nothing is open). Kills the process tree if it has not stopped after 3 s |
 | Undo turn | U (changes card focused), or palette |
+| Review the turn | R (card focused) |
+| Next or previous change in the review | J, K, or Alt+F5, Shift+Alt+F5 (focus in the review) |
+| Undo the current change in the review | Shift+U (focus in the review) |
 | Waiting queue | Mod+J |
 | Sessions | Mod+E |
 | Next or previous session tab | Ctrl+Tab, Ctrl+Shift+Tab (Ctrl on every OS; also from a terminal or pane) |
@@ -896,6 +901,32 @@ There is no status bar in FocusIDE, so the branch shows in the session header (i
 Verified: `npm run lint`, `npm test` (new Rust tests against temp repos: porcelain v2 parsing with renames, conflicts, spaces and detached or initial HEAD; stage, unstage before and after the first commit, commit staged and commit all, empty message refused, deleted files, commit file lists for normal and root commits, diff sides for staged, unstaged and commit, discard of tracked and untracked files, literal paths (`[a].txt` does not match `a.txt`) and non-ASCII names, branch create, switch and refused names, push without a remote, push with `-u` to a local bare remote, ahead count, fetch and pull, a project in a subfolder of a repository, the `.git` files that wake the panel). In Edge headless with the Vite dev server and a mocked Tauri API (not committed): Ctrl+Shift+G opens the panel as a tab next to the side bar, groups and letters, ahead and behind, the unstaged diff in the viewer tab, a commit file diff with its subject, a push failure showing git's text, the discard question, Ctrl+Enter commit with the message, the branch pick with a remote branch and "Create branch", file tree letters and folder dots, gutter markers (1 changed, 2 added), the rail badge, the "not a repository" state and Initialize, the branch in the session header, and the palette commands.
 
 Not verified: the Tauri window, real fetch, pull and push against a hosted remote with a credential helper (the tests use a local bare repo), a repository with thousands of changes, macOS and Linux.
+
+### Review and status (2026-11-15)
+
+From UX research: VS Code chat checkpoints and its diff editor, Zed's Review Changes (all files in one multibuffer), Cursor's Keep and Undo per change. Goal: review an agent's changes file by file and change by change, and always see what the agent does.
+
+| Decision | Why |
+|---|---|
+| Hunks come from Rust (`crates/core/src/hunks.rs`, the `similar` crate, Myers, lines with their line break). A hunk is one run of changed lines without context. The UI draws context and collapsed lines itself (`lib/review.ts`, `diffBlocks`), so the hunk the user sees is the hunk Rust undoes | One source for the hunk numbers, no second diff in the UI |
+| Undo change (`turn_undo_hunk`) writes the lines from before the turn back into one hunk, only while the file on disk still has the agent's lines there and the line above and below are unchanged and next to each other (a diff from the turn's end to the file on disk). Edits elsewhere in the file do not block it. Otherwise nothing is written and the review says "This part changed after the turn, so it was not undone." Same rule as Undo in Replace all (`replace.rs`). Each hunk shows its state: Undo change, Undone, or Changed after the turn | Undo never overwrites later edits |
+| New, deleted and binary files have no Undo change, only Undo file | A hunk of a new file would leave an empty file |
+| Undo file (`turn_revert_file` with `force`) first checks that the file is exactly as the agent left it. When it changed after the turn, a dialog asks: "Undo anyway" or Cancel. Undo file and Undo change need the project free (no running turn), like Undo turn. An undone file counts as kept | Nothing destructive without a question |
+| Keep marks a file of a turn as reviewed (`reviewed` on the changes or plan entry, kept in app data with the turn, `SavedTurn.reviewed`). Turns saved before this change have no list and count as reviewed, so old sessions do not all show a check. "Keep all" in the card and the review | Cursor's Keep, without a second store |
+| The diff tab is now a review (`ReviewView.svelte`): every file of a turn stacked, each with a sticky header (status, path, Undo file, Keep), hunks with three lines of context and "N unchanged lines. Select to show." Clicking a file in a changes card opens the review of the whole turn at that file. "Whole session" shows every turn of the session that is not undone, grouped by prompt (`app.reviewSession`, also from the status bar and the palette) | Zed's Review Changes |
+| Inline or side by side, a toggle in the review bar, saved in `settings.diffLayout`. The old view used CodeMirror's unified merge view, which has no side by side mode in the same component and its own chunks; the new view is plain HTML rows with syntax colors from the file's Lezer parser (`lib/diffHighlight.ts`, `classHighlighter`) | Both layouts from the same blocks |
+| Review keys: J and K (and Alt+F5, Shift+Alt+F5 as in VS Code) for the next or previous change across all files, Shift+U undoes the current change. They work while the focus is in the review and not in a text field. Checked: App.svelte uses none of them; CodeMirror is not in the review; F7 was avoided (caret browsing in Edge engines) | No clash with the app or the editor |
+| Status bar at the bottom (`StatusBar.svelte`, items in `stores/statusbar.svelte.ts`): the agent state of the active session ("Claude: Working 1m 05s", waiting, failed, "Done in 2m 10s", "Done, 3 files to review"), the files changed in the session (a click opens the whole session review), and for a file tab Ln and Col and the language. Other code adds items with `statusBar.add({ id, align, order, text, title?, tone?, icon?, run? })`; an item with empty text is hidden. Settings > Status bar and the palette turn it off | The git work can add the branch as one item |
+| Session tab state from one pure function (`tabState` in `lib/review.ts`): a spinning ring while working (a plain dot with reduced motion), amber when it waits for you, red when it failed, a check when it is done with files not kept, the dashed dot while dormant. The tooltip says the state with the elapsed time. Panes now get "done" and "failed" when a prompt that ran ends (hooks: Stop, StopFailure), so they count in the waiting queue like chat sessions | One mapping for the tab and the status bar |
+| Notifications: Settings > Notifications is never, "When FocusIDE is in the background" (default), or always (not for the session the user looks at in a focused window). In the background the taskbar button flashes (`requestUserAttention`, Informational; needs `core:window:allow-request-user-attention`). The old checkbox maps to never when it was off. Sound (off by default): a short Web Audio chime, lower for a failure, not for the session the user looks at | Owner request. The old rule only notified for other projects |
+| Palette: the five commands used last come first ("recently used"), and each row shows its keys from `lib/keys.ts`. That table lists every shortcut; the Keyboard shortcuts sheet (Mod+/, or the palette) shows it by group. A test checks that no key is used twice in the same place. Keys that work only in one place (U on a card) are not shown on palette rows | One source of truth for shown keys |
+| Mod+/ opens the sheet unless CodeMirror took the key first (toggle comment in editable text). A terminal keeps it | Mod+/ is toggle comment in every editor |
+
+Keys: see section 5. Mod+/ is new; J and K in the review now move between changes, not files (files are stacked).
+
+Verified: `cargo test` (hunk ranges, undo of one hunk keeps the others, an edit above the hunk does not block it, an edited hunk and a line added next to it block it, CRLF and a last line without a line break, and against a real shadow repo: file diff, a hunk changed after the turn refused, the other undone, the file state, a new file has no Undo change). `node --test scripts/review.test.mjs` (diff blocks and gaps, new files, side by side rows, kept files and counts, review items per turn and session, tab state, durations, change steps, notify rules and the old setting, recent commands, the shortcut table) and `scripts/restore.test.mjs` (kept files through a restart). `npm run lint`, `npm test`.
+
+Not verified: the app window (the review, the status bar, the tab states, Mod+/, the dialog before Undo file, notifications, the taskbar flash and the sound in WebView2), macOS and Linux. Amber for a pane that waits for a permission in its TUI: Claude's Notification hook is not part of the plugin, so a pane shows working until the prompt ends.
 
 ## 11. Open items
 

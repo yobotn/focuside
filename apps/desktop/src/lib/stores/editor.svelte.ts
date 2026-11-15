@@ -21,8 +21,9 @@ export interface ViewPos {
 }
 
 export type FileTab = { kind: "file"; path: string; preview: boolean };
-/** The diff tab: a turn's changes, or a git change when `git` is set (Git panel). */
-export type DiffTab = { kind: "diff"; turnId: string; paths: string[]; index: number; sessionKey: string; preview: boolean; git?: GitDiff };
+/** The review of a turn (or with scope "session", of every turn of the session), or a git change
+ * when `git` is set (Git panel). `index`: the file to scroll to; `seq` changes on every open. */
+export type DiffTab = { kind: "diff"; turnId: string; paths: string[]; index: number; sessionKey: string; preview: boolean; scope: "turn" | "session"; seq: number; git?: GitDiff };
 export type Tab = FileTab | DiffTab;
 
 export const DIFF_KEY = "\u0000diff";
@@ -158,6 +159,17 @@ class EditorStore implements ViewerHost {
   reveal = $state<{ projectId: string; path: string; seq: number } | null>(null);
   /** The editor view of the active file tab, for palette commands. Not reactive. */
   view: EditorView | null = null;
+  /** Line and column (1-based) of the cursor in the shown file, for the status bar. */
+  cursor = $state<{ path: string; line: number; col: number } | null>(null);
+
+  /** The editor of a file tab moved its cursor (CodeEditor). */
+  trackCursor(path: string, state: EditorState) {
+    const head = state.selection.main.head;
+    const line = state.doc.lineAt(head);
+    const next = { path, line: line.number, col: head - line.from + 1 };
+    const c = this.cursor;
+    if (!c || c.path !== next.path || c.line !== next.line || c.col !== next.col) this.cursor = next;
+  }
   private seq = 0;
   private inited = false;
 
@@ -232,7 +244,7 @@ class EditorStore implements ViewerHost {
     let next: ViewerTarget = null;
     if (p && tab?.kind === "file") next = { kind: "file", projectId: p.id, path: tab.path };
     else if (p && tab?.kind === "diff")
-      next = { kind: "diff", projectId: p.id, turnId: tab.turnId, paths: tab.paths, index: tab.index, sessionKey: tab.sessionKey, git: tab.git };
+      next = { kind: "diff", projectId: p.id, turnId: tab.turnId, paths: tab.paths, index: tab.index, sessionKey: tab.sessionKey, scope: tab.scope, git: tab.git };
     const cur = app.viewer;
     if (JSON.stringify(cur) !== JSON.stringify(next)) app.showViewer(next);
   }
@@ -266,10 +278,19 @@ class EditorStore implements ViewerHost {
     if (opts.line) this.jump = { projectId, path, line: opts.line, col: opts.col, len: opts.len, seq: ++this.seq };
   }
 
-  openDiff(projectId: string, d: { turnId: string; paths: string[]; index: number; sessionKey: string; git?: GitDiff }) {
+  /** Steps the file of a git diff tab (Git panel). Turn reviews scroll instead. */
+  stepDiff(w: Workspace, index: number) {
+    const i = w.index(DIFF_KEY);
+    const tab = w.tabs[i];
+    if (tab?.kind !== "diff") return;
+    w.tabs[i] = { ...tab, index: Math.max(0, Math.min(tab.paths.length - 1, index)) };
+    this.sync();
+  }
+
+  openDiff(projectId: string, d: { turnId: string; paths: string[]; index: number; sessionKey: string; scope?: "turn" | "session"; git?: GitDiff }) {
     const w = this.get(projectId);
     if (!w) return;
-    const tab: DiffTab = { kind: "diff", turnId: d.turnId, paths: d.paths, index: d.index, sessionKey: d.sessionKey, preview: true, git: d.git };
+    const tab: DiffTab = { kind: "diff", turnId: d.turnId, paths: d.paths, index: d.index, sessionKey: d.sessionKey, preview: true, scope: d.scope ?? "turn", seq: ++this.seq, git: d.git };
     const i = w.index(DIFF_KEY);
     if (i >= 0) w.tabs[i] = tab;
     else {
@@ -277,15 +298,6 @@ class EditorStore implements ViewerHost {
       w.tabs.splice(activeAt >= 0 ? activeAt + 1 : w.tabs.length, 0, tab);
     }
     this.activate(w, DIFF_KEY);
-  }
-
-  /** Moves the diff tab to another file of the turn. */
-  stepDiff(w: Workspace, index: number) {
-    const i = w.index(DIFF_KEY);
-    const tab = w.tabs[i];
-    if (tab?.kind !== "diff") return;
-    w.tabs[i] = { ...tab, index: Math.max(0, Math.min(tab.paths.length - 1, index)) };
-    this.sync();
   }
 
   activate(w: Workspace, key: string) {

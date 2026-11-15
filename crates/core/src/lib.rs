@@ -5,6 +5,7 @@ pub mod adapter_download;
 pub mod agent;
 pub mod files;
 pub mod git;
+pub mod hunks;
 pub mod plan;
 pub mod proc;
 pub mod project;

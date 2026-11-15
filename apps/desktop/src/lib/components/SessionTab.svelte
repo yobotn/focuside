@@ -3,9 +3,10 @@
   // the identity bar (Session tabs: Top) and the Sessions view of the side panel (Side).
   // Click shows it, double click renames it, middle click or the close button closes it.
   // Drag reorders (the list uses lib/reorder); Ctrl+Shift+Page Up or Page Down moves the active tab.
-  import { TerminalWindow, X } from "phosphor-svelte";
+  import { Check, TerminalWindow, X } from "phosphor-svelte";
   import { t } from "../i18n";
   import { app } from "../stores/app.svelte";
+  import { stateWords, statusBar } from "../stores/statusbar.svelte";
   import type { Session } from "../stores/session.svelte";
 
   let { session: s, active, closable, vertical = false }: { session: Session; active: boolean; closable: boolean; vertical?: boolean } = $props();
@@ -16,7 +17,10 @@
 
   const name = $derived(s.name || t("session.untitled"));
   const agent = $derived(app.agentName(s.agent));
-  const stateText = $derived(s.waiting ? t(`queue.${s.waiting}` as const) : s.busy ? t("conv.working") : s.dormant ? t("session.selectToResume") : "");
+  // Spinner while working, amber when it waits for you, red when it failed, a check when it is
+  // done with changes to review, the dashed dot while dormant (lib/review.ts, tabState).
+  const st = $derived(s.tabState);
+  const stateText = $derived(st === "idle" ? "" : stateWords(s, statusBar.now));
   const title = $derived([name, s.mode === "pane" ? t("pane.name", { agent }) : agent, stateText].filter(Boolean).join(" . ") + "\n" + t("session.renameHint") + "\n" + t("session.moveHint"));
 
   function startRename() {
@@ -63,7 +67,11 @@
         if (e.button === 1) close();
       }}
     >
-      <span class="state" class:busy={s.busy} class:waiting={!!s.waiting} aria-hidden="true"></span>
+      {#if st === "review"}
+        <Check size={11} weight="bold" class="state-check" aria-hidden="true" />
+      {:else}
+        <span class="state {st}" aria-hidden="true"></span>
+      {/if}
       <span class="name truncate">{name}</span>
       <span class="agent">
         {#if s.mode === "pane"}<TerminalWindow size={11} />{/if}
@@ -140,13 +148,42 @@
     background: transparent;
     box-shadow: inset 0 0 0 1px var(--border-strong);
   }
-  .state.busy {
-    background: var(--accent);
+  /* Working: a small spinning ring. */
+  .state.working {
+    width: 8px;
+    height: 8px;
     box-shadow: none;
+    border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-top-color: var(--accent);
+    animation: spin 0.9s linear infinite;
   }
   .state.waiting {
     background: var(--warn-line);
     box-shadow: none;
+  }
+  .state.failed {
+    background: var(--danger);
+    box-shadow: none;
+  }
+  .state.done {
+    background: var(--accent);
+    box-shadow: none;
+  }
+  .main :global(.state-check) {
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .state.working {
+      animation: none;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
   }
   /* A restored tab whose agent has not started: a dashed dot ("Select to resume"). */
   .dormant .state {

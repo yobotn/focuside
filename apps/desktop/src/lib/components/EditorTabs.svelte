@@ -27,12 +27,12 @@
   });
 
   function label(tab: Tab): string {
-    if (tab.kind === "diff") return t("editor.diffTab", { name: tab.paths[tab.index]?.split("/").pop() ?? "" });
+    if (tab.kind === "diff") return tab.scope === "session" ? t("review.tabSession") : t("review.tabTurn", { count: tab.paths.length });
     return names.get(tab.path)?.name ?? tab.path;
   }
 
   function title(tab: Tab): string {
-    if (tab.kind === "diff") return `${t("viewer.diff")}: ${tab.paths[tab.index] ?? ""}`;
+    if (tab.kind === "diff") return tab.scope === "session" ? t("review.tabSession") : tab.paths.join("\n");
     const lines = [tab.path];
     if (w.docs[tab.path]?.dirty) lines.push(t("viewer.unsaved"));
     if (tab.preview) lines.push(t("editor.previewHint"));
