@@ -61,7 +61,8 @@ pub struct Launch {
 const TERM_ENV: &[(&str, &str)] = &[("TERM", "xterm-256color"), ("COLORTERM", "truecolor")];
 
 /// Starts `launch` in a new PTY (ConPTY on Windows) in `cwd`. `on_data` gets the output.
-/// `on_exit` runs once, after the program exited and its last output was read.
+/// `on_exit` runs once, after the program exited and its last output was read, with the exit
+/// code when the process reported one.
 pub fn spawn(
     launch: &Launch,
     cwd: &Path,
@@ -69,7 +70,7 @@ pub fn spawn(
     rows: u16,
     session: Option<String>,
     mut on_data: impl FnMut(&[u8]) + Send + 'static,
-    on_exit: impl FnOnce() + Send + 'static,
+    on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> anyhow::Result<Pty> {
     let pair = native_pty_system().openpty(PtySize {
         rows: rows.max(2),
@@ -107,9 +108,9 @@ pub fn spawn(
     // ConPTY keeps the output pipe open after the program exits, until the pseudo console is
     // closed. So exit is taken from the process, and the reader gets a short time to drain.
     std::thread::spawn(move || {
-        let _ = child.wait();
+        let code = child.wait().ok().map(|s| s.exit_code());
         let _ = done_rx.recv_timeout(Duration::from_millis(400));
-        on_exit();
+        on_exit(code);
     });
 
     Ok(Pty {
@@ -182,7 +183,7 @@ pub fn pty_open(
         None => None,
     };
     let launch = match &pane {
-        Some(p) => p.launch.clone(),
+        Some(p) => p.launch(),
         None => {
             let (program, args) = match shell.filter(|s| !s.trim().is_empty()) {
                 Some(s) => (s, vec![]),
@@ -210,14 +211,14 @@ pub fn pty_open(
         let _ = app2.emit("pty", json!({ "id": id2, "data": b64.encode(bytes) }));
     };
     let (app3, id3, pane3) = (app.clone(), id.clone(), pane.clone());
-    let on_exit = move || {
+    let on_exit = move |code: Option<u32>| {
         // Dropping the PTY closes the pseudo console and ends the reader.
         let removed = app3.state::<AppState>().ptys.lock().unwrap().remove(&id3);
         drop(removed);
         let _ = app3.emit("pty-exit", json!({ "id": id3 }));
         if let Some(p) = pane3 {
             let id = id3.clone();
-            tauri::async_runtime::spawn(async move { p.on_pty_exit(&id).await });
+            tauri::async_runtime::spawn(async move { p.on_pty_exit(&id, code).await });
         }
     };
     let pty = match spawn(&launch, &root, cols, rows, session, on_data, on_exit) {
@@ -312,7 +313,7 @@ mod tests {
                 out2.lock().unwrap().extend_from_slice(b);
                 let _ = tx2.send(Ev::Data);
             },
-            move || {
+            move |_| {
                 let _ = tx.send(Ev::Exit);
             },
         )
@@ -469,19 +470,27 @@ mod tests {
         answered: usize,
         /// Every byte the TUI wrote, for the terminal title sequences.
         raw: Arc<Mutex<Vec<u8>>>,
+        /// Set when the TUI exited: its exit code.
+        exit: Arc<Mutex<Option<Option<u32>>>>,
     }
 
     impl ClaudeScreen {
         fn start(launch: Launch) -> Self {
             let cwd = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+            Self::start_in(launch, &cwd)
+        }
+
+        fn start_in(launch: Launch, cwd: &Path) -> Self {
             let screen = Arc::new(Mutex::new(vt100::Parser::new(40, 120, 0)));
             let asks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let (screen2, asks2) = (screen.clone(), asks.clone());
             let raw = Arc::new(Mutex::new(Vec::new()));
             let raw2 = raw.clone();
+            let exit = Arc::new(Mutex::new(None));
+            let exit2 = exit.clone();
             let pty = spawn(
                 &launch,
-                &cwd,
+                cwd,
                 120,
                 40,
                 None,
@@ -491,7 +500,7 @@ mod tests {
                     raw2.lock().unwrap().extend_from_slice(b);
                     screen2.lock().unwrap().process(b);
                 },
-                || {},
+                move |code| *exit2.lock().unwrap() = Some(code),
             )
             .expect("spawn");
             Self {
@@ -500,7 +509,13 @@ mod tests {
                 asks,
                 answered: 0,
                 raw,
+                exit,
             }
+        }
+
+        /// The exit code once the TUI exited: Some(code), else None while it runs.
+        fn exited(&self) -> Option<Option<u32>> {
+            *self.exit.lock().unwrap()
         }
 
         /// The terminal titles the TUI set (OSC 0 and OSC 2), in order.
@@ -691,6 +706,184 @@ mod tests {
         );
     }
 
+    /// Claude's transcript folder for a project folder: `~/.claude/projects/<path with every
+    /// character that is not a letter or digit replaced by '-'>`. Tests only: FocusIDE never
+    /// reads transcripts; panes get the session id from hook events.
+    fn transcripts_of(cwd: &Path) -> std::path::PathBuf {
+        let home = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .expect("home folder");
+        let name: String = crate::dunce(cwd.canonicalize().unwrap())
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        std::path::PathBuf::from(home)
+            .join(".claude/projects")
+            .join(name)
+    }
+
+    fn transcript_ids(dir: &Path) -> Vec<(std::time::SystemTime, String)> {
+        let mut out: Vec<_> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "jsonl"))
+            .filter_map(|e| {
+                let t = e.metadata().ok()?.modified().ok()?;
+                Some((t, e.path().file_stem()?.to_string_lossy().to_string()))
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// Resume in a Claude pane, live: starts the Claude TUI in `target/resume-live` (inside
+    /// this trusted repo), types one short prompt so a conversation exists (the test types it;
+    /// FocusIDE never does), closes the TUI, takes the session id from the newest transcript
+    /// file name (test only), then starts the pane's resume launch (`claude --resume <id>`)
+    /// and checks that the TUI starts with that conversation and no error. Last, an unknown
+    /// id: the TUI must exit with an error code within `RESUME_FAIL_WINDOW`, which is how a
+    /// pane detects a failed resume.
+    /// `cargo test -p focuside-desktop -- --ignored real_claude_resume --nocapture`.
+    /// Run it from a plain terminal: inside a Claude Code session the variables of that session
+    /// (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, ...) make the test's Claude a child session
+    /// that writes no transcript of its own.
+    #[test]
+    #[ignore]
+    fn real_claude_resume() {
+        assert!(
+            std::env::var_os("CLAUDE_CODE_CHILD_SESSION").is_none()
+                && std::env::var_os("CLAUDECODE").is_none(),
+            "run this test outside a Claude Code session"
+        );
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let cwd = root.join("target/resume-live");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let transcripts = transcripts_of(&cwd);
+        let before = transcript_ids(&transcripts);
+        let launch = |args: Vec<String>| {
+            let tui = focuside_core::agent::tui_command("claude").expect("claude installed");
+            let mut all = tui.args.clone();
+            all.extend(args);
+            Launch {
+                program: tui.program.to_string_lossy().to_string(),
+                args: all,
+                env: vec![],
+            }
+        };
+
+        // 1. A fresh TUI and one short prompt.
+        let mut c = ClaudeScreen::start_in(launch(vec![]), &cwd);
+        let screen = c.wait_for("shift+tab to cycle", 40000);
+        assert!(
+            screen.contains("shift+tab to cycle"),
+            "the TUI started: {screen} raw: {:?}",
+            String::from_utf8_lossy(&c.raw.lock().unwrap())
+        );
+        c.wait(3000);
+        let prompt = "Reply with the single word: resumed";
+        // The TUI can drop the first keys right after it starts: type again until it shows.
+        let mut typed = String::new();
+        for _ in 0..5 {
+            c.pty.write(prompt.as_bytes()).unwrap();
+            typed = c.wait_for("single word", 6000);
+            if typed.contains("single word") {
+                break;
+            }
+        }
+        assert!(
+            typed.contains("single word"),
+            "the TUI took the text: {typed}"
+        );
+        c.wait(500);
+        c.pty.write(b"\r").unwrap();
+        let mut id = None;
+        for i in 0..450 {
+            let screen = c.wait(200);
+            if i == 50 {
+                println!("after Enter:\n{screen}");
+            }
+            let new: Vec<_> = transcript_ids(&transcripts)
+                .into_iter()
+                .filter(|x| !before.iter().any(|b| b.1 == x.1))
+                .collect();
+            if let Some((_, n)) = new.last() {
+                let text = std::fs::read_to_string(transcripts.join(format!("{n}.jsonl")))
+                    .unwrap_or_default();
+                if text.contains("\"type\":\"assistant\"") {
+                    id = Some(n.clone());
+                    break;
+                }
+            }
+        }
+        let id = id.unwrap_or_else(|| {
+            panic!(
+                "a new transcript with an answer in {}; screen:\n{}",
+                transcripts.display(),
+                c.wait(100)
+            )
+        });
+        println!("session id: {id}");
+        c.wait(2000);
+        drop(c);
+
+        // 2. The pane's resume launch brings that conversation back.
+        let mut tui = focuside_core::agent::tui_command("claude").unwrap();
+        assert!(tui.resume("claude", &id));
+        let resume_args: Vec<String> = tui.args.clone();
+        assert!(resume_args.ends_with(&["--resume".to_string(), id.clone()]));
+        let mut r = ClaudeScreen::start_in(
+            Launch {
+                program: tui.program.to_string_lossy().to_string(),
+                args: resume_args,
+                env: vec![],
+            },
+            &cwd,
+        );
+        let screen = r.wait_for("shift+tab to cycle", 40000);
+        println!("resumed screen:\n{screen}");
+        assert!(
+            screen.contains("shift+tab to cycle"),
+            "the resumed TUI started"
+        );
+        assert!(
+            !screen.to_lowercase().contains("no conversation found"),
+            "no resume error"
+        );
+        assert!(
+            screen.contains("Reply with the single word"),
+            "the earlier prompt is on the screen"
+        );
+        r.wait(1500);
+        assert_eq!(r.exited(), None, "the resumed TUI still runs");
+        drop(r);
+
+        // 3. An unknown id: the TUI exits with an error soon.
+        let mut bad = ClaudeScreen::start_in(
+            launch(vec![
+                "--resume".into(),
+                "00000000-0000-4000-8000-000000000000".into(),
+            ]),
+            &cwd,
+        );
+        let started = std::time::Instant::now();
+        while bad.exited().is_none() && started.elapsed() < Duration::from_secs(30) {
+            bad.wait(200);
+        }
+        let took = started.elapsed();
+        println!(
+            "unknown id: exit {:?} after {took:?}\n{}",
+            bad.exited(),
+            bad.wait(100)
+        );
+        let code = bad.exited().expect("the TUI exited");
+        assert_ne!(code, Some(0), "an error exit code");
+        assert!(
+            took < crate::pane::RESUME_FAIL_WINDOW,
+            "within the resume fail window"
+        );
+    }
+
     fn tui_starts_and_closes(launch: Launch, cwd: &std::path::Path) {
         let out = Arc::new(Mutex::new(Vec::<u8>::new()));
         let out2 = out.clone();
@@ -702,7 +895,7 @@ mod tests {
             40,
             Some("s1".into()),
             move |b| out2.lock().unwrap().extend_from_slice(b),
-            move || {
+            move |_| {
                 let _ = tx.send(());
             },
         )

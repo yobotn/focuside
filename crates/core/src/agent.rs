@@ -493,7 +493,53 @@ pub fn plans_dir_args(id: &str, folder: &str) -> Option<Vec<String>> {
     Some(vec!["--settings".to_string(), json])
 }
 
+/// The agent's own session id as a plain id FocusIDE may pass on a command line: letters,
+/// digits, `-` and `_`, 1 to 128 characters, starting with a letter or digit (so it can never
+/// look like a flag). Claude, Codex and Gemini CLI use UUIDs. None for anything else.
+pub fn clean_session_id(id: &str) -> Option<&str> {
+    let ok = !id.is_empty()
+        && id.len() <= 128
+        && id.as_bytes()[0].is_ascii_alphanumeric()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    ok.then_some(id)
+}
+
+/// Arguments that start an agent's TUI in one of its earlier conversations, by the agent's own
+/// session id (the `session_id` of its hook events). Only agents with a documented resume
+/// option:
+/// - Claude: `--resume <id>` (`claude --help`, Claude Code 2.1.325: "Resume a conversation by
+///   session ID or name"). The session id, not `--continue`, so each pane gets its own
+///   conversation back.
+/// - Codex: `codex resume <SESSION_ID>` (Codex CLI command reference). A subcommand: it goes
+///   right after the program, before any other argument. Codex panes get no other arguments.
+/// - Gemini CLI: `--resume <uuid>` (Gemini CLI session management docs: "you can also provide
+///   the full session UUID").
+///
+/// None for other agents and for an id `clean_session_id` refuses.
+pub fn tui_resume_args(agent: &str, session: &str) -> Option<Vec<String>> {
+    let s = clean_session_id(session)?.to_string();
+    match agent {
+        "claude" | "gemini" => Some(vec!["--resume".into(), s]),
+        "codex" => Some(vec!["resume".into(), s]),
+        _ => None,
+    }
+}
+
 impl TuiCommand {
+    /// Adds `tui_resume_args`. Returns false when the agent has no resume option or the id is
+    /// not a plain id. Call it before any other argument is added (Codex takes a subcommand).
+    pub fn resume(&mut self, agent: &str, session: &str) -> bool {
+        match tui_resume_args(agent, session) {
+            Some(a) => {
+                self.args.extend(a);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Adds `plans_dir_args`. Returns false when nothing was added.
     pub fn set_plans_folder(&mut self, id: &str, folder: &str) -> bool {
         match plans_dir_args(id, folder) {
@@ -725,6 +771,17 @@ mod tests {
         };
         assert!(!other.start_in_plan_mode("codex"));
         assert!(other.args.is_empty());
+        // Resuming a pane's conversation: a launch option, allowed. It is not a forbidden flag.
+        let id = "0b9d7d0e-5d43-4c1e-9a4f-3f7e2a1c9b10";
+        for a in AGENTS {
+            for arg in tui_resume_args(a.id, id).unwrap_or_default() {
+                assert!(
+                    !FORBIDDEN_TUI_FLAGS.contains(&arg.as_str()),
+                    "{} passes {arg} to resume",
+                    a.id
+                );
+            }
+        }
         assert_eq!(tui_command("custom"), Err(Missing::Agent));
         assert_eq!(tui_command("nope"), Err(Missing::Agent));
     }
@@ -760,6 +817,60 @@ mod tests {
         assert!(tui.set_plans_folder("claude", "plans"));
         assert!(!tui.set_plans_folder("claude", "../out"));
         assert_eq!(tui.args.len(), 2);
+    }
+
+    #[test]
+    fn resume_args_use_the_session_id() {
+        let id = "0b9d7d0e-5d43-4c1e-9a4f-3f7e2a1c9b10";
+        assert_eq!(
+            tui_resume_args("claude", id),
+            Some(vec!["--resume".to_string(), id.to_string()])
+        );
+        assert_eq!(
+            tui_resume_args("codex", id),
+            Some(vec!["resume".to_string(), id.to_string()])
+        );
+        assert_eq!(
+            tui_resume_args("gemini", id),
+            Some(vec!["--resume".to_string(), id.to_string()])
+        );
+        // No documented resume option: a fresh start.
+        for a in ["opencode", "goose", "qwen", "cursor", "custom", ""] {
+            assert_eq!(tui_resume_args(a, id), None, "{a}");
+        }
+        // Never `--continue`: with several panes it could pick another pane's conversation.
+        for a in AGENTS {
+            let args = tui_resume_args(a.id, id).unwrap_or_default();
+            assert!(!args.iter().any(|x| x == "--continue" || x == "-c"));
+        }
+        // Only plain ids reach the command line, and none that looks like a flag.
+        for bad in [
+            "",
+            "-p",
+            "--print",
+            "a b",
+            "a;b",
+            "a\"b",
+            "../x",
+            "x\ny",
+            &"a".repeat(129),
+        ] {
+            assert_eq!(clean_session_id(bad), None, "{bad:?}");
+            assert_eq!(tui_resume_args("claude", bad), None, "{bad:?}");
+        }
+        assert_eq!(clean_session_id("abc_DEF-123"), Some("abc_DEF-123"));
+        let mut tui = TuiCommand {
+            program: PathBuf::from("codex"),
+            args: vec![],
+        };
+        assert!(tui.resume("codex", id));
+        assert_eq!(tui.args, vec!["resume", id]);
+        let mut fresh = TuiCommand {
+            program: PathBuf::from("goose"),
+            args: vec!["session".into()],
+        };
+        assert!(!fresh.resume("goose", id));
+        assert_eq!(fresh.args, vec!["session"]);
     }
 
     #[test]

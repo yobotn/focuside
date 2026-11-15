@@ -21,6 +21,14 @@
 //!
 //! `pane_prompt` carries the prompt text from UserPromptSubmit and `pane_idle` the last answer
 //! from Stop, for the Prompts panel. The UI keeps them in FocusIDE's app data only.
+//!
+//! Resume: every hook event carries the agent's own session id (`sessionId`). The pane keeps
+//! the newest one and reports it as `pane_session`; the UI saves it with the session. A pane
+//! started with a known id runs the agent's resume option (`agent::tui_resume_args`, for
+//! example `claude --resume <id>`), also when the user starts the TUI again after it exited.
+//! When that TUI exits with an error soon after it started and before any hook event, the
+//! resume failed: `pane_exited` carries `resumeFailed`, the id is dropped and the next start is
+//! a fresh TUI. FocusIDE never reads the agent's transcript files to find an id.
 
 use crate::project::Project;
 use crate::pty::Launch;
@@ -34,12 +42,17 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 /// The key sequence of Shift+Tab (CSI Z). The mode button sends it; Claude Code moves to its
 /// next permission mode. It is the same input as the user pressing Shift+Tab in the pane.
 pub const MODE_KEY: &[u8] = b"\x1b[Z";
+
+/// A resumed TUI that exits with an error within this time, before any hook event, counts as
+/// a failed resume (for example "No conversation found with session ID"). A TUI that ran
+/// longer, or exited with code 0 (the user quit), did not fail to resume.
+pub const RESUME_FAIL_WINDOW: Duration = Duration::from_secs(45);
 
 struct PaneTurn {
     id: String,
@@ -67,6 +80,13 @@ struct PaneState {
     mode: Option<String>,
     /// The agent's todo list, from TodoWrite or the Task tools.
     todos: Vec<Todo>,
+    /// The agent's own session id: from the UI at start (a restored session), then from each
+    /// hook event. The next TUI start resumes it.
+    agent_session: Option<String>,
+    /// The running TUI was started with the resume option and no hook event came since.
+    resuming: bool,
+    /// When the running TUI started.
+    opened: Option<Instant>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -135,8 +155,12 @@ pub struct Pane {
     pub project: Arc<Project>,
     /// Agent id ("claude", "codex", ...). Events from another agent's hooks are ignored.
     pub agent: String,
-    /// What `pty_open` starts for this pane. Resolved in Rust, never sent by the UI.
-    pub launch: Launch,
+    /// The agent's TUI without resume, plan or settings arguments. Resolved in Rust, never sent
+    /// by the UI. `launch` builds what `pty_open` starts from it.
+    tui: TuiCommand,
+    /// Plan mode and plan folder arguments (Claude), added after the resume option.
+    extra_args: Vec<String>,
+    plugin: Option<PathBuf>,
     /// `FOCUSIDE_EVENTS` for this pane.
     pub events_dir: PathBuf,
     /// Started with the focuside plugin (`--plugin-dir`), so hooks are expected.
@@ -150,6 +174,17 @@ pub struct Pane {
     turn_lock: tokio::sync::Mutex<()>,
     /// Keeps the events folder watcher alive.
     watcher: Mutex<Option<Box<dyn std::any::Any + Send>>>,
+}
+
+/// What a pane starts: the TUI, the plan mode and plan folder arguments, the plugin, and the
+/// agent's own session id to resume.
+pub struct PaneLaunch {
+    pub tui: TuiCommand,
+    pub extra_args: Vec<String>,
+    pub plugin: Option<PathBuf>,
+    /// The agent's own session id (a restored session). Ignored when it is not a plain id or
+    /// the agent has no resume option.
+    pub resume: Option<String>,
 }
 
 /// The PTY launch for an agent TUI: the resolved program and arguments, plus
@@ -203,29 +238,17 @@ pub fn take_events(dir: &Path) -> Vec<Value> {
 }
 
 impl Pane {
-    pub fn new(
-        app: AppHandle,
-        project: Arc<Project>,
-        agent: &str,
-        tui: TuiCommand,
-        plugin: Option<PathBuf>,
-    ) -> Arc<Self> {
+    pub fn new(app: AppHandle, project: Arc<Project>, agent: &str, start: PaneLaunch) -> Arc<Self> {
         let sink: Sink = Arc::new(move |data| {
             let _ = app.emit("session", data);
         });
-        let pane = Self::with_sink(sink, project, agent, tui, plugin);
+        let pane = Self::with_sink(sink, project, agent, start);
         pane.watch_events();
         pane
     }
 
     /// A pane that sends its events to `sink`. `new` uses the app; tests use a list.
-    fn with_sink(
-        sink: Sink,
-        project: Arc<Project>,
-        agent: &str,
-        tui: TuiCommand,
-        plugin: Option<PathBuf>,
-    ) -> Arc<Self> {
+    fn with_sink(sink: Sink, project: Arc<Project>, agent: &str, start: PaneLaunch) -> Arc<Self> {
         let key = new_id("s");
         let events_dir = events_dir(&project, &key);
         // A fresh folder: no events from an earlier run.
@@ -233,17 +256,25 @@ impl Pane {
         if let Err(e) = std::fs::create_dir_all(&events_dir) {
             tracing::warn!("events folder {}: {e}", events_dir.display());
         }
+        let agent_session = start
+            .resume
+            .filter(|id| focuside_core::agent::tui_resume_args(agent, id).is_some());
         Arc::new(Self {
             recorder: TurnRecorder::new(project.clone(), &key),
-            launch: launch_for(tui, &events_dir, plugin.as_deref()),
-            hooks_expected: plugin.is_some(),
+            hooks_expected: start.plugin.is_some(),
             mode_key: agent == "claude",
+            tui: start.tui,
+            extra_args: start.extra_args,
+            plugin: start.plugin,
             key,
             project,
             agent: agent.to_string(),
             events_dir,
             sink,
-            st: Mutex::new(PaneState::default()),
+            st: Mutex::new(PaneState {
+                agent_session,
+                ..PaneState::default()
+            }),
             turn_lock: tokio::sync::Mutex::new(()),
             watcher: Mutex::new(None),
         })
@@ -298,9 +329,32 @@ impl Pane {
         });
     }
 
+    /// What `pty_open` starts now: the TUI, the resume option when the agent's session id is
+    /// known, the plan mode and plan folder arguments, the plugin and `FOCUSIDE_EVENTS`. Marks
+    /// the start as a resume, so a quick failure falls back to a fresh TUI (`on_pty_exit`).
+    pub fn launch(&self) -> Launch {
+        let mut st = self.st.lock().unwrap();
+        let mut tui = self.tui.clone();
+        // The resume option goes first: Codex takes a subcommand.
+        st.resuming = st
+            .agent_session
+            .as_deref()
+            .is_some_and(|id| tui.resume(&self.agent, id));
+        tui.args.extend(self.extra_args.iter().cloned());
+        launch_for(tui, &self.events_dir, self.plugin.as_deref())
+    }
+
+    /// The agent's own session id the pane knows, if any.
+    #[cfg(test)]
+    fn agent_session(&self) -> Option<String> {
+        self.st.lock().unwrap().agent_session.clone()
+    }
+
     /// Sets the PTY that runs the TUI. Exit events of other PTYs are ignored from then on.
     pub fn set_pty(&self, id: Option<String>) {
-        self.st.lock().unwrap().pty = id;
+        let mut st = self.st.lock().unwrap();
+        st.opened = id.as_ref().map(|_| Instant::now());
+        st.pty = id;
     }
 
     fn running(&self) -> bool {
@@ -314,27 +368,46 @@ impl Pane {
         self.end_locked("open").await;
         self.st.lock().unwrap().working = false;
         if self.running() {
+            let resumed = self.st.lock().unwrap().resuming;
             self.emit(
                 "pane_started",
-                json!({ "hooksExpected": self.hooks_expected }),
+                json!({
+                    "hooksExpected": self.hooks_expected,
+                    "resumed": resumed,
+                    "canResume": self.can_resume(),
+                }),
             );
             self.emit("pane_idle", json!({}));
         }
     }
 
-    /// The TUI exited (or was killed). Ends the open turn and releases the claim.
-    pub async fn on_pty_exit(self: &Arc<Self>, pty_id: &str) {
-        {
+    /// The agent has a resume option (`agent::tui_resume_args`).
+    pub fn can_resume(&self) -> bool {
+        focuside_core::agent::tui_resume_args(&self.agent, "0").is_some()
+    }
+
+    /// The TUI exited (or was killed) with exit code `code`. Ends the open turn and releases
+    /// the claim. A resumed TUI that failed (see `RESUME_FAIL_WINDOW`) drops the session id, so
+    /// the next start is a fresh TUI.
+    pub async fn on_pty_exit(self: &Arc<Self>, pty_id: &str, code: Option<u32>) {
+        let failed = {
             let mut st = self.st.lock().unwrap();
             if st.pty.as_deref() != Some(pty_id) {
                 return;
             }
             st.pty = None;
             st.working = false;
-        }
+            let quick = st.opened.is_some_and(|t| t.elapsed() < RESUME_FAIL_WINDOW);
+            let failed = st.resuming && quick && code != Some(0);
+            st.resuming = false;
+            if failed {
+                st.agent_session = None;
+            }
+            failed
+        };
         let _g = self.turn_lock.lock().await;
         self.end_locked("exit").await;
-        self.emit("pane_exited", json!({}));
+        self.emit("pane_exited", json!({ "resumeFailed": failed }));
     }
 
     /// One hook event from the events folder (see crates/hook for the fields).
@@ -344,10 +417,20 @@ impl Pane {
         }
         let event = ev["event"].as_str().unwrap_or("");
         let _g = self.turn_lock.lock().await;
-        let (first, mode) = {
+        let (first, mode, session) = {
             let mut st = self.st.lock().unwrap();
             if st.closed {
                 return;
+            }
+            // A hook event: the resumed conversation runs.
+            st.resuming = false;
+            let session = ev["sessionId"]
+                .as_str()
+                .and_then(focuside_core::agent::clean_session_id)
+                .filter(|id| st.agent_session.as_deref() != Some(*id))
+                .map(String::from);
+            if session.is_some() {
+                st.agent_session.clone_from(&session);
             }
             let first = !std::mem::replace(&mut st.hooks_live, true);
             let mode = ev["mode"]
@@ -357,10 +440,13 @@ impl Pane {
             if mode.is_some() {
                 st.mode.clone_from(&mode);
             }
-            (first, mode)
+            (first, mode, session)
         };
         if first {
             self.emit("hooks_live", json!({}));
+        }
+        if let Some(id) = session {
+            self.emit("pane_session", json!({ "agentSession": id }));
         }
         if let Some(m) = mode {
             self.emit("pane_mode", json!({ "mode": m }));
@@ -597,15 +683,125 @@ mod tests {
     }
 
     fn pane(f: &Fixture, plugin: Option<PathBuf>) -> Arc<Pane> {
+        pane_with(f, "claude", plugin, None)
+    }
+
+    fn pane_with(
+        f: &Fixture,
+        agent: &str,
+        plugin: Option<PathBuf>,
+        resume: Option<&str>,
+    ) -> Arc<Pane> {
         let events = f.events.clone();
         let sink: Sink = Arc::new(move |v| events.lock().unwrap().push(v));
         let tui = TuiCommand {
-            program: PathBuf::from("claude"),
+            program: PathBuf::from(agent),
             args: vec![],
         };
-        let p = Pane::with_sink(sink, f.project.clone(), "claude", tui, plugin);
+        let start = PaneLaunch {
+            tui,
+            extra_args: vec!["--permission-mode".into(), "plan".into()],
+            plugin,
+            resume: resume.map(String::from),
+        };
+        let p = Pane::with_sink(sink, f.project.clone(), agent, start);
         p.set_pty(Some("pty1".into()));
         p
+    }
+
+    const SID: &str = "0b9d7d0e-5d43-4c1e-9a4f-3f7e2a1c9b10";
+
+    #[tokio::test]
+    async fn resume_uses_the_session_id_from_hooks() {
+        let f = fixture().await;
+        // A fresh pane: no resume option, plan mode and plugin as before.
+        let p = pane(&f, Some(PathBuf::from("/plugin")));
+        let l = p.launch();
+        assert_eq!(
+            l.args,
+            vec!["--permission-mode", "plan", "--plugin-dir", "/plugin"]
+        );
+        p.on_pty_open().await;
+        let started = f.events.lock().unwrap().clone();
+        let started = started
+            .iter()
+            .find(|e| e["kind"] == "pane_started")
+            .unwrap();
+        assert_eq!(started["resumed"], false);
+        assert_eq!(started["canResume"], true);
+        // Every hook event carries the session id; it is reported once per change.
+        p.on_hook(hook("UserPromptSubmit", json!({ "sessionId": SID })))
+            .await;
+        p.on_hook(hook("Stop", json!({ "sessionId": SID }))).await;
+        let ids: Vec<Value> = f
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["kind"] == "pane_session")
+            .map(|e| e["agentSession"].clone())
+            .collect();
+        assert_eq!(ids, vec![json!(SID)]);
+        assert_eq!(p.agent_session().as_deref(), Some(SID));
+        // An id that is not a plain id is never kept.
+        p.on_hook(hook("Stop", json!({ "sessionId": "--print" })))
+            .await;
+        assert_eq!(p.agent_session().as_deref(), Some(SID));
+        // The next start of the TUI resumes that conversation.
+        assert_eq!(
+            p.launch().args,
+            vec![
+                "--resume",
+                SID,
+                "--permission-mode",
+                "plan",
+                "--plugin-dir",
+                "/plugin"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_resume_falls_back_to_a_fresh_tui() {
+        let f = fixture().await;
+        let p = pane_with(&f, "claude", None, Some(SID));
+        assert_eq!(p.launch().args[..2], ["--resume", SID]);
+        p.on_pty_open().await;
+        let started = f.events.lock().unwrap().clone();
+        let started = started
+            .iter()
+            .find(|e| e["kind"] == "pane_started")
+            .unwrap();
+        assert_eq!(started["resumed"], true);
+        // Exits with an error right away: the resume failed, the next start is fresh.
+        p.on_pty_exit("pty1", Some(1)).await;
+        let exited = f.events.lock().unwrap().clone();
+        let exited = exited.iter().find(|e| e["kind"] == "pane_exited").unwrap();
+        assert_eq!(exited["resumeFailed"], true);
+        assert_eq!(p.agent_session(), None);
+        assert_eq!(p.launch().args, vec!["--permission-mode", "plan"]);
+
+        // The user quits a resumed TUI (exit code 0): not a failure, the id stays.
+        let q = pane_with(&f, "claude", None, Some(SID));
+        q.launch();
+        q.on_pty_exit("pty1", Some(0)).await;
+        assert_eq!(q.agent_session().as_deref(), Some(SID));
+        // A hook event means the resumed conversation runs: a later error exit keeps the id.
+        let r = pane_with(&f, "claude", None, Some(SID));
+        r.launch();
+        r.on_hook(hook("UserPromptSubmit", json!({ "sessionId": SID })))
+            .await;
+        r.on_pty_exit("pty1", Some(1)).await;
+        assert_eq!(r.agent_session().as_deref(), Some(SID));
+
+        // Codex: a subcommand right after the program. Agents without a resume option start
+        // fresh and ignore the id.
+        let c = pane_with(&f, "codex", None, Some(SID));
+        assert_eq!(c.launch().args[..2], ["resume", SID]);
+        let o = pane_with(&f, "opencode", None, Some(SID));
+        assert_eq!(o.agent_session(), None);
+        assert!(!o.launch().args.iter().any(|a| a == SID));
+        assert!(!o.can_resume());
     }
 
     fn kinds(f: &Fixture) -> Vec<String> {
@@ -769,7 +965,7 @@ mod tests {
         assert_eq!(last["failure"], "rate_limit");
         // Pane exit releases too.
         p.on_hook(hook("UserPromptSubmit", json!({}))).await;
-        p.on_pty_exit("pty1").await;
+        p.on_pty_exit("pty1", Some(0)).await;
         assert!(!p.holds_claim());
     }
 
@@ -780,7 +976,7 @@ mod tests {
         p.on_pty_open().await;
         assert!(!p.holds_claim(), "no turn starts when the pane opens");
         std::fs::write(f.root.path().join("a.txt"), "two\n").unwrap();
-        p.on_pty_exit("pty1").await;
+        p.on_pty_exit("pty1", Some(0)).await;
         assert!(!kinds(&f).contains(&"turn_started".to_string()));
         assert!(!kinds(&f).contains(&"turn_ended".to_string()));
         // Events from another agent are ignored.
@@ -823,16 +1019,10 @@ mod tests {
             vec![json!("plan"), json!("auto")],
             "sent on change only"
         );
-        p.on_pty_exit("pty1").await;
+        p.on_pty_exit("pty1", Some(0)).await;
         assert_eq!(p.mode_key_ready(), Err("closed"));
         // Other agents: no mode key.
-        let events = f.events.clone();
-        let sink: Sink = Arc::new(move |v| events.lock().unwrap().push(v));
-        let tui = TuiCommand {
-            program: PathBuf::from("codex"),
-            args: vec![],
-        };
-        let c = Pane::with_sink(sink, f.project.clone(), "codex", tui, None);
+        let c = pane_with(&f, "codex", None, None);
         c.set_pty(Some("pty2".into()));
         assert_eq!(c.mode_key_ready(), Err("noModeKey"));
     }

@@ -121,9 +121,20 @@ pub fn startup_paths(state: State<'_, AppState>) -> Vec<String> {
 /// The UI keeps its own state (recent projects, session names, settings) as one JSON file.
 /// A file that does not parse (for example after a hand edit) is kept as state.json.bad, and
 /// the previous good state is tried from state.json.bak, so the next save never wipes it.
+/// It holds, per project, the open session tabs (order, active tab), the saved sessions with
+/// their names and agent session ids, the panel layout and which panels were shown.
 #[tauri::command]
 pub fn ui_state_load(state: State<'_, AppState>) -> Value {
-    let path = state.config_dir.join("state.json");
+    load_state(&state.config_dir)
+}
+
+#[tauri::command]
+pub fn ui_state_save(state: State<'_, AppState>, value: Value) -> Res<()> {
+    save_state(&state.config_dir, &value).map_err(err)
+}
+
+fn load_state(dir: &std::path::Path) -> Value {
+    let path = dir.join("state.json");
     let parse = |p: &std::path::Path| -> Option<Value> {
         let b = std::fs::read(p).ok()?;
         let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&b);
@@ -133,26 +144,25 @@ pub fn ui_state_load(state: State<'_, AppState>) -> Value {
         return v;
     }
     if path.is_file() {
-        let bad = state.config_dir.join("state.json.bad");
+        let bad = dir.join("state.json.bad");
         let _ = std::fs::copy(&path, &bad);
         tracing::warn!(
             "state.json does not parse; kept a copy at {}",
             bad.display()
         );
     }
-    parse(&state.config_dir.join("state.json.bak")).unwrap_or(Value::Null)
+    parse(&dir.join("state.json.bak")).unwrap_or(Value::Null)
 }
 
-#[tauri::command]
-pub fn ui_state_save(state: State<'_, AppState>, value: Value) -> Res<()> {
-    let path = state.config_dir.join("state.json");
-    let tmp = state.config_dir.join("state.json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(&value).map_err(err)?).map_err(err)?;
+fn save_state(dir: &std::path::Path, value: &Value) -> std::io::Result<()> {
+    let path = dir.join("state.json");
+    let tmp = dir.join("state.json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
     // One previous version stays as state.json.bak.
     if path.is_file() {
-        let _ = std::fs::copy(&path, state.config_dir.join("state.json.bak"));
+        let _ = std::fs::copy(&path, dir.join("state.json.bak"));
     }
-    std::fs::rename(&tmp, &path).map_err(err)
+    std::fs::rename(&tmp, &path)
 }
 
 #[tauri::command]
@@ -225,8 +235,11 @@ pub async fn project_close(state: State<'_, AppState>, id: String) -> Res<()> {
 
 /// Creates a session and starts its agent in the background. Progress arrives as events.
 /// `mode` "pane" creates a pane session instead: the agent's own TUI, which the UI starts with
-/// `pty_open` and this session key. A pane always starts a fresh TUI; `resume` is not passed
-/// to the agent. `hooks` is the "Turn tracking in Claude panes" setting (on by default): only
+/// `pty_open` and this session key. For a pane, `resume` is the agent's own session id (from
+/// its hook events, saved with the session): the TUI starts with the agent's resume option
+/// (`agent::tui_resume_args`) and falls back to a fresh TUI when that fails. Without an id, or
+/// for an agent without a resume option, the pane starts a fresh TUI. For chat mode, `resume`
+/// is the ACP session id (session/load). `hooks` is the "Turn tracking in Claude panes" setting (on by default): only
 /// with true does a Claude pane get `--plugin-dir` with the generated focuside plugin. `brief`
 /// is "Brief replies in Claude panes" (off by default): the plugin copy with the output style.
 /// `plan_first` starts a Claude pane in plan mode (`--permission-mode plan`, see
@@ -250,19 +263,30 @@ pub async fn session_start(
     let p = project(&state, &project_id)?;
     if mode.as_deref() == Some("pane") {
         let agent_id = agent_id.as_deref().unwrap_or("claude");
-        let mut tui = agent::tui_command(agent_id).map_err(missing)?;
+        let tui = agent::tui_command(agent_id).map_err(missing)?;
+        // Plan mode and the plan folder go after the resume option (see `Pane::launch`).
+        let mut extra = agent::TuiCommand {
+            program: tui.program.clone(),
+            args: vec![],
+        };
         if plan_first == Some(true) {
-            tui.start_in_plan_mode(agent_id);
+            extra.start_in_plan_mode(agent_id);
         }
         if let Some(f) = plan_folder.as_deref() {
-            tui.set_plans_folder(agent_id, f);
+            extra.set_plans_folder(agent_id, f);
         }
         let plugin = if agent_id == "claude" && hooks == Some(true) {
             claude_plugin(&state.data_dir, brief == Some(true))
         } else {
             None
         };
-        let pane = Pane::new(app, p, agent_id, tui, plugin);
+        let start = crate::pane::PaneLaunch {
+            tui,
+            extra_args: extra.args,
+            plugin,
+            resume,
+        };
+        let pane = Pane::new(app, p, agent_id, start);
         let key = pane.key.clone();
         state.panes.lock().unwrap().insert(key.clone(), pane);
         return Ok(key);
@@ -641,4 +665,40 @@ pub async fn turn_file_bytes(
         .await
         .map_err(|e| format!("{e:#}"))?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the UI saves for a restart: tabs per project, the saved sessions with the agent's
+    /// session id, panel visibility and the dock. It must come back as it was saved.
+    #[test]
+    fn ui_state_round_trip() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(load_state(d.path()), Value::Null);
+        let state = json!({
+            "open": [r"C:\p"],
+            "active": r"C:\p",
+            "tabs": { r"C:\p": { "ids": ["pane-s2", "chat-1"], "active": "chat-1" } },
+            "panels": { "plan": true, "prompts": true, "terminal": false },
+            "sessions": { r"C:\p": [
+                { "acpId": "pane-s2", "name": "Fix the bug", "mode": "pane", "agent": "claude",
+                  "agentSession": "0b9d7d0e-5d43-4c1e-9a4f-3f7e2a1c9b10" },
+                { "acpId": "chat-1", "name": "Tests", "mode": "chat", "agent": "claude" }
+            ] },
+            "filesVisible": false,
+            "layout": { "sideView": "sessions", "dock": { "left": [] } },
+        });
+        save_state(d.path(), &state).unwrap();
+        assert_eq!(load_state(d.path()), state);
+        // A second save keeps the first as state.json.bak; a broken state.json falls back to it.
+        let mut next = state.clone();
+        next["tabs"][r"C:\p"]["active"] = json!("pane-s2");
+        save_state(d.path(), &next).unwrap();
+        assert_eq!(load_state(d.path()), next);
+        std::fs::write(d.path().join("state.json"), b"{ broken").unwrap();
+        assert_eq!(load_state(d.path()), state);
+        assert!(d.path().join("state.json.bad").is_file());
+    }
 }
