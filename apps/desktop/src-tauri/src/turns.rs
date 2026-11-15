@@ -3,6 +3,7 @@
 
 use crate::project::Project;
 use anyhow::{anyhow, Result};
+use focuside_core::hunks;
 use focuside_core::snapshot::{Changes, NotCovered};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -225,21 +226,35 @@ pub async fn redo(project: &Project, turn_id: &str) -> Result<UndoOutcome> {
     })
 }
 
-/// Restores one file (and the old path of a rename) to how it was before the turn.
-pub async fn revert_file(project: &Project, turn_id: &str, path: &str) -> Result<UndoOutcome> {
-    let rec = find(project, turn_id)?;
-    let mut paths = vec![path.to_string()];
-    if let Some(old) = rec
-        .changes
+fn old_path_of(rec: &TurnRecord, path: &str) -> Option<String> {
+    rec.changes
         .files
         .iter()
         .find(|f| f.path == path)
         .and_then(|f| f.old_path.clone())
-    {
+}
+
+/// Restores one file (and the old path of a rename) to how it was before the turn. Unless
+/// `force`, it fails with `hunks::CHANGED_SINCE` when the file changed after the turn.
+pub async fn revert_file(
+    project: &Project,
+    turn_id: &str,
+    path: &str,
+    force: bool,
+) -> Result<UndoOutcome> {
+    let rec = find(project, turn_id)?;
+    let mut paths = vec![path.to_string()];
+    if let Some(old) = old_path_of(&rec, path) {
         paths.push(old);
     }
     let repo = &project.shadow;
     let _g = repo.lock.lock().await;
+    if !force {
+        let end = rec.end.as_deref().unwrap_or(&rec.start);
+        if !hunks::unchanged_since(repo, end, path).await? {
+            anyhow::bail!(hunks::CHANGED_SINCE);
+        }
+    }
     let r = repo.restore(&rec.start, &paths).await?;
     Ok(UndoOutcome {
         exact: r.verified,
@@ -247,6 +262,42 @@ pub async fn revert_file(project: &Project, turn_id: &str, path: &str) -> Result
         kept: vec![],
         failed: r.failed,
     })
+}
+
+/// One file of a turn for the review: both versions, the hunks and their state on disk.
+pub async fn file_diff(project: &Project, turn_id: &str, path: &str) -> Result<hunks::FileDiff> {
+    let rec = find(project, turn_id)?;
+    let end = rec.end.clone().unwrap_or_else(|| rec.start.clone());
+    let old = old_path_of(&rec, path);
+    let f = hunks::TurnFile {
+        start: &rec.start,
+        end: &end,
+        path,
+        old_path: old.as_deref(),
+    };
+    hunks::file_diff(&project.shadow, &f).await
+}
+
+/// Undo change: one hunk of a file back to how it was before the turn.
+pub async fn undo_hunk(
+    project: &Project,
+    turn_id: &str,
+    path: &str,
+    index: usize,
+) -> Result<hunks::FileDiff> {
+    let rec = find(project, turn_id)?;
+    let end = rec
+        .end
+        .clone()
+        .ok_or_else(|| anyhow!("The turn is still running."))?;
+    let old = old_path_of(&rec, path);
+    let f = hunks::TurnFile {
+        start: &rec.start,
+        end: &end,
+        path,
+        old_path: old.as_deref(),
+    };
+    hunks::undo_hunk(&project.shadow, &f, index).await
 }
 
 #[derive(Debug, Clone, Serialize)]
