@@ -96,7 +96,54 @@ export const api = {
     invoke<UndoOutcome>("turn_revert_file", { projectId, turnId, path }),
   fileVersions: (projectId: string, turnId: string, path: string) =>
     invoke<FileVersions>("turn_file_versions", { projectId, turnId, path }),
+
+  fsRead: (projectId: string, path: string) => invoke<FileContent>("fs_read", { projectId, path }),
+  fsWrite: (projectId: string, path: string, content: string) => invoke<void>("fs_write", { projectId, path, content }),
+  fsSearch: (projectId: string, query: SearchQuery) =>
+    invoke<{ hits: SearchHit[]; truncated: boolean }>("fs_search", { projectId, query }),
+  /** The files Replace all would change, with the number of matches in each. */
+  fsReplacePreview: (projectId: string, query: SearchQuery) =>
+    invoke<FileMatches[]>("fs_replace_preview", { projectId, query }),
+  /** Replace all in the given files. `id` is null when Undo is not possible. */
+  fsReplace: (projectId: string, query: SearchQuery, replace: string, paths: string[]) =>
+    invoke<{ id: string | null; files: FileMatches[]; failed: [string, string][]; undo: boolean }>("fs_replace", { projectId, query, replace, paths }),
+  fsReplaceUndo: (projectId: string, id: string) =>
+    invoke<{ restored: string[]; skipped: string[]; failed: [string, string][] }>("fs_replace_undo", { projectId, id }),
 };
+
+/** A file as the viewer reads it (files::FileContent). */
+export type FileContent =
+  | { kind: "text"; content: string; size: number }
+  | { kind: "binary"; size: number }
+  | { kind: "large"; size: number }
+  | { kind: "missing" };
+
+/** Search and replace in files (files::SearchQuery). Globs are comma separated. */
+export interface SearchQuery {
+  query: string;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+  include: string;
+  exclude: string;
+}
+
+export interface SearchHit {
+  path: string;
+  line: number;
+  /** UTF-16 column of the first match in the line. */
+  col: number;
+  text: string;
+  /** The preview starts after the start of the line. */
+  cut: boolean;
+  /** Matches in `text`, UTF-16 offsets. */
+  ranges: [number, number][];
+}
+
+export interface FileMatches {
+  path: string;
+  count: number;
+}
 
 export type SessionEvent = { key: string; projectId: string; kind: string } & Record<string, any>;
 

@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { t } from "./lib/i18n";
   import { isMac, keyLabel, mod } from "./lib/platform";
   import { agentNote, app } from "./lib/stores/app.svelte";
   import { applyTheme } from "./lib/theme.svelte";
-  import { allFiles } from "./lib/files.svelte";
   import Conversation from "./lib/components/Conversation.svelte";
   import EmptyState from "./lib/components/EmptyState.svelte";
   import EnvBanner from "./lib/components/EnvBanner.svelte";
@@ -18,6 +17,11 @@
   import SidePanel from "./lib/components/SidePanel.svelte";
   import Viewer from "./lib/components/Viewer.svelte";
   import SearchPanel from "./lib/components/SearchPanel.svelte";
+  import QuickOpen from "./lib/components/QuickOpen.svelte";
+  import SaveDialog from "./lib/components/SaveDialog.svelte";
+  import { editor, tabKey } from "./lib/stores/editor.svelte";
+  import { search } from "./lib/stores/search.svelte";
+  import { gotoLine, openReplace, openSearchPanel } from "./lib/findPanel";
   import Settings from "./lib/components/Settings.svelte";
   import TerminalDrawer from "./lib/components/TerminalDrawer.svelte";
   import Splitter from "./lib/components/Splitter.svelte";
@@ -33,11 +37,11 @@
 
   let conversation: Conversation | undefined = $state();
   let messageBox: MessageBox | undefined = $state();
-  let files = $state<string[]>([]);
   let savedList = $state<ListItem[]>([]);
 
   onMount(() => {
     app.init();
+    editor.init();
     const un = getCurrentWebview().onDragDropEvent((e) => {
       if (e.payload.type === "drop") {
         // Folders open as projects. Files are left to the message box (images).
@@ -69,9 +73,6 @@
     if (app.settings.agent === "custom")
       items.push({ id: "chat-custom", label: t("cmd.newSessionWith", { name: t("agent.custom") }), run: () => app.newSession(undefined, "custom", "chat") });
     return items;
-  });
-  $effect(() => {
-    if (app.overlay === "openFile" && project) allFiles(project.id, true).then((f) => (files = f));
   });
   $effect(() => {
     if (app.overlay === "sessions" && project) {
@@ -134,12 +135,14 @@
       { id: "sessions", label: t("cmd.sessions"), hint: keyLabel("Mod+E"), run: () => (app.overlay = "sessions") },
       { id: "queue", label: t("cmd.waiting"), hint: keyLabel("Mod+J"), run: () => (app.overlay = "queue") },
       { id: "file", label: t("cmd.openFile"), hint: keyLabel("Mod+P"), run: () => (app.overlay = "openFile") },
-      { id: "search", label: t("cmd.search"), hint: keyLabel("Mod+Shift+F"), run: () => (app.overlay = "search") },
+      { id: "search", label: t("cmd.search"), hint: keyLabel("Mod+Shift+F"), run: () => openSearch() },
+      { id: "saveAll", label: t("cmd.saveAll"), hint: keyLabel("Mod+Alt+S"), run: () => editor.saveAll() },
       { id: "files", label: t("cmd.files"), hint: keyLabel("Mod+B"), run: () => dock.toggle("side") },
       { id: "term", label: t("cmd.terminal"), hint: keyLabel("Mod+`"), run: () => dock.toggle("terminal") },
       { id: "planPanel", label: t("cmd.planPanel"), run: () => dock.show("plan") },
       { id: "promptsPanel", label: t("cmd.promptsPanel"), run: () => dock.show("prompts") },
       { id: "sessionPanel", label: t("cmd.sessionPanel"), run: () => dock.show("session") },
+      ...editorCommands(),
       { id: "plan", label: t("cmd.planFirst"), run: () => app.setPlanFirst(!app.planFirst) },
       { id: "resetLayout", label: t("cmd.resetLayout"), run: () => app.resetLayout() },
       {
@@ -179,14 +182,49 @@
     return items;
   });
 
-  const fileItems = $derived<ListItem[]>(
-    files.map((f) => ({
-      id: f,
-      label: f,
-      file: f,
-      run: () => project && (app.viewer = { kind: "file", projectId: project.id, path: f }),
-    })),
-  );
+  /** Palette commands for the editor tabs, when the project has some. */
+  function editorCommands(): ListItem[] {
+    const w = editor.get(project?.id);
+    if (!w?.tabs.length) return [];
+    const items: ListItem[] = [{ id: "showEditor", label: t("cmd.showEditor"), run: () => editor.show(w) }];
+    const tab = w.current;
+    if (tab) {
+      items.push({ id: "closeEditor", label: t("cmd.closeEditor"), hint: keyLabel("Mod+W"), run: () => editor.close(w, [w.active!]) });
+      items.push({ id: "closeAll", label: t("cmd.closeAllEditors"), run: () => editor.close(w, w.tabs.map(tabKey)) });
+    }
+    if (tab?.kind === "file") {
+      items.push({ id: "gotoLine", label: t("cmd.gotoLine"), hint: keyLabel("Mod+G"), run: () => editorCommand(gotoLine) });
+      items.push({ id: "find", label: t("cmd.findInFile"), hint: keyLabel("Mod+F"), run: () => editorCommand(openSearchPanel) });
+      items.push({ id: "replace", label: t("cmd.replaceInFile"), hint: keyLabel("Mod+H"), run: () => editorCommand(openReplace) });
+    }
+    if (w.closed.length) items.push({ id: "reopen", label: t("cmd.reopenEditor"), hint: keyLabel("Mod+Shift+T"), run: () => editor.reopenClosed(w) });
+    return items;
+  }
+
+  /** Runs a CodeMirror command in the open file (go to line, find). */
+  function editorCommand(cmd: (v: import("@codemirror/view").EditorView) => boolean) {
+    const w = editor.get(project?.id);
+    if (w?.current?.kind !== "file") return false;
+    if (w.hidden) editor.show(w);
+    tick().then(() => {
+      const v = editor.view;
+      if (!v) return;
+      v.focus();
+      cmd(v);
+    });
+    return true;
+  }
+
+  /** Mod+Shift+F: the Search panel, with the selected text of the editor when it is one line. */
+  function openSearch() {
+    const v = editor.view;
+    if (v?.hasFocus) {
+      const r = v.state.selection.main;
+      const text = v.state.sliceDoc(r.from, r.to);
+      if (text && !/[\r\n]/.test(text) && text.length < 200) search.query = text;
+    }
+    dock.show("search");
+  }
 
   // Docked panels (lib/dock). A group shows while one of its panels is visible.
   let winW = $state(window.innerWidth);
@@ -269,8 +307,26 @@
     if (inTerminal(target) && !(mod(e) && e.key === "`") && !(e.ctrlKey && e.shiftKey) && !(e.ctrlKey && e.key === "Tab")) return;
     const k = e.key.toLowerCase();
     if (mod(e) && !e.shiftKey && k === "k") app.overlay = app.overlay === "palette" ? null : "palette";
+    else if (mod(e) && e.shiftKey && !e.altKey && k === "p") app.overlay = app.overlay === "palette" ? null : "palette";
     else if (mod(e) && !e.shiftKey && k === "p") app.overlay = "openFile";
-    else if (mod(e) && e.shiftKey && k === "f") app.overlay = "search";
+    else if (mod(e) && e.shiftKey && k === "f") openSearch();
+    // Editor tabs: Mod+W closes, Mod+Shift+T reopens, Mod+S saves, Mod+Alt+S saves all.
+    else if (mod(e) && !e.shiftKey && !e.altKey && k === "w") {
+      const w = editor.get(project?.id);
+      if (w?.current && !w.hidden) editor.close(w, [w.active!]);
+    } else if (mod(e) && e.shiftKey && !e.altKey && k === "t") {
+      const w = editor.get(project?.id);
+      if (w) editor.reopenClosed(w);
+    } else if (mod(e) && e.altKey && !e.shiftKey && (k === "s" || (isMac && e.code === "KeyS"))) editor.saveAll();
+    else if (mod(e) && !e.shiftKey && !e.altKey && k === "s") {
+      if (!e.defaultPrevented) editor.saveActive();
+    }
+    // Mod+G, Mod+F and Mod+H outside the text but inside the viewer go to the open file.
+    else if (mod(e) && !e.shiftKey && !e.altKey && k === "g" && !e.defaultPrevented) {
+      if (!editorCommand(gotoLine)) return;
+    } else if (mod(e) && !e.shiftKey && !e.altKey && (k === "f" || k === "h") && !e.defaultPrevented && target?.closest(".viewer")) {
+      if (!editorCommand(k === "f" ? openSearchPanel : openReplace)) return;
+    }
     else if (mod(e) && k === "j") app.overlay = "queue";
     else if (mod(e) && k === "e") app.overlay = "sessions";
     else if (mod(e) && k === "b") dock.toggle("side");
@@ -285,10 +341,12 @@
       const plan = session?.waitingPlan;
       if (session && plan) app.runPlan(session, plan);
     } else if (e.key === "Escape") {
-      // Esc only closes overlays and the viewer. It never discards a plan.
+      // Esc only closes overlays and the viewer. It never discards a plan. In the editor text
+      // it stays with the editor (find panel, selections).
+      if (e.defaultPrevented || editor.ask) return;
       if (app.undoTarget) app.undoTarget = null;
       else if (app.overlay) app.overlay = null;
-      else if (app.viewer) app.viewer = null;
+      else if (app.viewer && !target?.closest(".cm-editor")) app.viewer = null;
       else if (session?.running) app.stop();
       else return;
     } else return;
@@ -387,6 +445,7 @@
         {/if}
       </main>
       {#if visible("side")}<div class="host" {@attach dockHost("side")}><SidePanel {project} /></div>{/if}
+      {#if visible("search")}<div class="host" {@attach dockHost("search")}><SearchPanel {project} /></div>{/if}
       {#if visible("viewer")}<div class="host" {@attach dockHost("viewer")}><Viewer {project} /></div>{/if}
       {#if visible("plan")}<div class="host" {@attach dockHost("plan")}><PlanPanel /></div>{/if}
       {#if visible("prompts")}<div class="host" {@attach dockHost("prompts")}><PromptsPanel /></div>{/if}
@@ -404,18 +463,20 @@
   <ListOverlay placeholder={t("session.new")} items={newItems} empty={t("palette.empty")} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "palette"}
   <ListOverlay placeholder={t("palette.placeholder")} items={paletteItems} onclose={() => (app.overlay = null)} />
-{:else if app.overlay === "openFile"}
-  <ListOverlay placeholder={t("palette.openFile")} items={fileItems} mono onclose={() => (app.overlay = null)} />
+{:else if app.overlay === "openFile" && project}
+  <QuickOpen {project} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "model"}
   <ListOverlay title={t("model.title")} items={modelItems} searchable={false} empty={t("model.none")} onclose={() => (app.overlay = null)} />
-{:else if app.overlay === "search" && project}
-  <SearchPanel {project} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "settings"}
   <Settings onclose={() => (app.overlay = null)} />
 {/if}
 
 {#if app.undoTarget}
   <UndoDialog target={app.undoTarget} />
+{/if}
+
+{#if editor.ask}
+  <SaveDialog ask={editor.ask} />
 {/if}
 
 {#if app.chatAsk}

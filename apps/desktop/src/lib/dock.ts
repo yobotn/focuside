@@ -5,10 +5,10 @@
 // the conversation of the active session).
 // Pure functions only, so the layout can be checked and changed without the UI.
 
-export type PanelId = "session" | "side" | "viewer" | "plan" | "prompts" | "terminal";
+export type PanelId = "session" | "side" | "search" | "viewer" | "plan" | "prompts" | "terminal";
 export type Zone = "left" | "center" | "right" | "bottom";
 
-export const PANELS: PanelId[] = ["session", "side", "viewer", "plan", "prompts", "terminal"];
+export const PANELS: PanelId[] = ["session", "side", "search", "viewer", "plan", "prompts", "terminal"];
 export const ZONES: Zone[] = ["left", "center", "right", "bottom"];
 
 /** Panels in one place. `size` is the width in pixels (not used in the bottom zone). */
@@ -30,8 +30,8 @@ export type Dock = Record<Zone, DockGroup[]>;
 export type DropTarget = { kind: "zone"; zone: Zone; after?: string } | { kind: "group"; zone: Zone; id: string };
 
 /** The Session panel keeps at least 360 px wherever it is (PLAN.md section 5). */
-export const MIN_WIDTH: Record<PanelId, number> = { session: 360, side: 160, viewer: 320, plan: 280, prompts: 240, terminal: 240 };
-export const DEFAULT_WIDTH: Record<PanelId, number> = { session: 640, side: 248, viewer: 640, plan: 640, prompts: 320, terminal: 480 };
+export const MIN_WIDTH: Record<PanelId, number> = { session: 360, side: 160, search: 220, viewer: 320, plan: 280, prompts: 240, terminal: 240 };
+export const DEFAULT_WIDTH: Record<PanelId, number> = { session: 640, side: 248, search: 320, viewer: 640, plan: 640, prompts: 320, terminal: 480 };
 export const DEFAULT_BOTTOM = 260;
 
 let seq = 0;
@@ -45,13 +45,14 @@ function group(p: PanelId, size = DEFAULT_WIDTH[p]): DockGroup {
 }
 
 /**
- * Side bar on the left. In the center the Session panel, then the viewer, the plan and the
- * prompts as tabs (the editor area). Terminal below. Plan, prompts and terminal stay hidden
- * until they open.
+ * Side bar on the left, with Search as a second tab. In the center the Session panel, then the
+ * viewer, the plan and the prompts as tabs (the editor area). Terminal below. Search, plan,
+ * prompts and terminal stay hidden until they open.
  */
 export function defaultDock(): Dock {
   const editor: DockGroup = { id: groupId(), panels: ["viewer", "plan", "prompts"], active: "viewer", size: DEFAULT_WIDTH.viewer };
-  return { left: [group("side")], center: [group("session"), editor], right: [], bottom: [group("terminal")] };
+  const side: DockGroup = { id: groupId(), panels: ["side", "search"], active: "side", size: DEFAULT_WIDTH.side };
+  return { left: [side], center: [group("session"), editor], right: [], bottom: [group("terminal")] };
 }
 
 /** The dock from the layout saved before docking (files and viewer on a side, terminal below). */
