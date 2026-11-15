@@ -3,8 +3,8 @@
 // settings, prompt history, and for a restart: the open projects, each project's session tabs
 // and active tab, the dock layout and which panels were shown). Restored tabs start their
 // agent only when first shown (wake).
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import {
   api,
@@ -27,6 +27,8 @@ import { applyTheme, type Theme } from "../theme.svelte";
 import { DEFAULT_BOTTOM, defaultDock, legacyDock, normalizeDock, type Dock } from "../dock";
 import { updates } from "../updates.svelte";
 import { loadPanels, loadTabs, tabsOf, type SavedPanels, type SavedTabs } from "../restore";
+import { loadNotify, pushRecent, reviewItems, setReviewed as reviewedList, shouldNotify, type NotifyMode } from "../review";
+import { playChime } from "../sound";
 
 export interface Settings {
   theme: Theme;
@@ -38,7 +40,15 @@ export interface Settings {
   /** Check GitHub Releases for updates in the background. */
   autoUpdate: boolean;
   showIgnored: boolean;
-  notifications: boolean;
+  /** System notifications when a session finishes or waits (lib/review.ts, shouldNotify).
+   * Replaces the old checkbox `notifications` (false became "never"). */
+  notify: NotifyMode;
+  /** A short sound when a session finishes or waits. */
+  notifySound: boolean;
+  /** The status bar at the bottom of the window. */
+  statusBar: boolean;
+  /** The review (diff tab): changes inline or side by side. */
+  diffLayout: "inline" | "split";
   /** Turn tracking in Claude panes: start them with the focuside plugin (--plugin-dir). On by
    * default. v0.2.0 stored null before its one-time question; null counts as on. */
   claudeHooks: boolean;
@@ -118,6 +128,8 @@ interface Persisted {
   layout: Layout;
   /** Editor tabs per project root (stores/editor.svelte.ts). */
   editor?: unknown;
+  /** Palette command ids, newest first. */
+  recentCommands: string[];
 }
 
 const defaults: Persisted = {
@@ -129,7 +141,25 @@ const defaults: Persisted = {
   panels: { plan: false, prompts: false, terminal: false },
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [], planFolder: "" },
+  settings: {
+    theme: "system",
+    fontSize: 15,
+    shell: "",
+    agent: "claude",
+    agentCommand: "",
+    autoUpdate: true,
+    showIgnored: false,
+    notify: "background",
+    notifySound: false,
+    statusBar: true,
+    diffLayout: "inline",
+    claudeHooks: true,
+    claudeBrief: false,
+    sessionTabs: "top",
+    chatConfirmed: [],
+    planFolder: "",
+  },
+  recentCommands: [],
   filesVisible: true,
   layout: defaultLayout(),
 };
@@ -139,12 +169,14 @@ export interface Project extends ProjectInfo {
   activeKey: string | null;
 }
 
-export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "settings" | "model" | "new";
+export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "settings" | "model" | "new" | "shortcuts";
 
+/** A review of changes in the diff tab. `paths` and `index`: the files of the turn and the one
+ * to scroll to. `scope` "session": every turn of the session that is not undone. */
 export type ViewerTarget =
   | null
   | { kind: "file"; projectId: string; path: string }
-  | { kind: "diff"; projectId: string; turnId: string; paths: string[]; index: number; sessionKey: string };
+  | { kind: "diff"; projectId: string; turnId: string; paths: string[]; index: number; sessionKey: string; scope?: "turn" | "session" };
 
 /** The editor store, which owns the viewer's tabs. */
 export interface ViewerHost {
@@ -215,6 +247,14 @@ class AppStore {
   }
   /** Editor tabs per project (stores/editor.svelte.ts), as saved. Kept apart from the rest of the state. */
   editorSaved = $state<unknown>(null);
+  /** Palette command ids, newest first (shown at the top of the palette). */
+  recentCommands = $state<string[]>([]);
+
+  /** The palette ran a command: it goes to the top of the list next time. */
+  ranCommand(id: string) {
+    this.recentCommands = pushRecent(this.recentCommands, id);
+    this.save();
+  }
 
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   /** Open tabs per project root from the state file, until restoreTabs used them. */
@@ -265,6 +305,13 @@ class AppStore {
       if (typeof this.settings.claudeBrief !== "boolean") this.settings.claudeBrief = false;
       if (this.settings.sessionTabs !== "side") this.settings.sessionTabs = "top";
       if (typeof this.settings.planFolder !== "string") this.settings.planFolder = "";
+      const old = this.settings as Settings & { notifications?: unknown };
+      this.settings.notify = loadNotify(old.notify, old.notifications);
+      delete old.notifications;
+      if (typeof this.settings.notifySound !== "boolean") this.settings.notifySound = false;
+      if (typeof this.settings.statusBar !== "boolean") this.settings.statusBar = true;
+      if (this.settings.diffLayout !== "split") this.settings.diffLayout = "inline";
+      this.recentCommands = Array.isArray(st.recentCommands) ? st.recentCommands.filter((x) => typeof x === "string").slice(0, 5) : [];
       // Snapshots skip the plan folder. A folder Rust refuses counts as Claude's default.
       if (this.settings.planFolder)
         await api.planFolderSet(this.settings.planFolder).catch(() => (this.settings.planFolder = ""));
@@ -362,6 +409,7 @@ class AppStore {
       filesVisible: this.filesVisible,
       layout: $state.snapshot(this.layout),
       editor: $state.snapshot(this.editorSaved),
+      recentCommands: [...this.recentCommands],
     };
     api.uiStateSave(st).catch(() => {});
   }
@@ -864,22 +912,103 @@ class AppStore {
     this.updateTitle();
   }
 
+  /**
+   * A session finished or waits. Settings > Notifications: never, while FocusIDE is in the
+   * background (default), or always (but not for the session the user looks at). In the
+   * background the taskbar button also flashes (requestUserAttention). The sound is separate.
+   */
   private async notifyWaiting(s: Session, w: Exclude<Waiting, null>) {
-    if (!this.settings.notifications) return;
-    const visible = this.focused && this.session?.key === s.key;
-    const sameProject = this.focused && this.activeId === s.projectId;
-    // System notification only when the session is in a project the user is not looking at.
-    if (visible || sameProject) return;
+    const looking = this.focused && this.session?.key === s.key;
+    if (this.settings.notifySound && !looking) playChime(w === "failed");
+    if (!shouldNotify(this.settings.notify, this.focused, looking)) return;
+    if (!this.focused) getCurrentWindow().requestUserAttention(UserAttentionType.Informational).catch(() => {});
     try {
       let ok = await isPermissionGranted();
       if (!ok) ok = (await requestPermission()) === "granted";
       if (!ok) return;
       const p = this.projects.find((x) => x.id === s.projectId);
-      const body = w === "plan" ? t("notify.plan") : w === "permission" ? t("notify.permission") : t("notify.done");
-      sendNotification({ title: t("notify.waiting", { project: p?.name ?? "", session: s.name }), body });
+      const body = w === "plan" ? t("notify.plan") : w === "permission" ? t("notify.permission") : w === "failed" ? t("notify.failed") : t("notify.done");
+      sendNotification({ title: t("notify.waiting", { project: p?.name ?? "", session: s.name || t("session.untitled") }), body });
     } catch {
       // Notifications are optional.
     }
+  }
+
+  // Review
+
+  /** The turn or changes card of a turn in a session. */
+  turnEntry(s: Session, turnId: string) {
+    const e = s.entries.findLast((x) => (x.t === "changes" || x.t === "plan") && x.turnId === turnId);
+    return e && (e.t === "changes" || e.t === "plan") ? e : undefined;
+  }
+
+  /** Keep (mark reviewed) a file of a turn, or take it back. Kept in app data. */
+  setReviewed(s: Session, turnId: string, path: string, keep: boolean) {
+    const e = this.turnEntry(s, turnId);
+    if (!e) return;
+    e.reviewed = reviewedList(e.reviewed, path, keep);
+    this.saveSessionData(s);
+  }
+
+  /** Keep every file of a turn. */
+  keepAll(s: Session, turnId: string) {
+    const e = this.turnEntry(s, turnId);
+    if (!e?.result?.changes) return;
+    e.reviewed = e.result.changes.files.map((f) => f.path);
+    this.saveSessionData(s);
+  }
+
+  /**
+   * Undo file: one file of a turn back to how it was before the turn. When the file changed
+   * after the turn, it asks first. The file then counts as reviewed. True when it was undone.
+   */
+  async undoFile(s: Session | undefined, projectId: string, turnId: string, path: string): Promise<boolean> {
+    const run = (force: boolean) => api.revertFile(projectId, turnId, path, force);
+    try {
+      let out;
+      try {
+        out = await run(false);
+      } catch (e) {
+        if (errText(e) !== "changedSince") throw e;
+        const yes = await ask(t("review.changedSinceAsk", { path }), {
+          title: t("review.undoFile"),
+          kind: "warning",
+          okLabel: t("review.undoAnyway"),
+          cancelLabel: t("common.cancel"),
+        });
+        if (!yes) return false;
+        out = await run(true);
+      }
+      if (out.failed.length) {
+        this.flash(out.failed[0][1], "error");
+        return false;
+      }
+      this.flash(t("review.fileUndone", { path }));
+      if (s) this.setReviewed(s, turnId, path, true);
+      return true;
+    } catch (e) {
+      this.flash(errText(e), "error");
+      return false;
+    }
+  }
+
+  /** Opens the review of one turn in the diff tab, scrolled to file `index`. */
+  reviewTurn(s: Session, turnId: string, index = 0) {
+    const files = this.turnEntry(s, turnId)?.result?.changes?.files ?? [];
+    if (!files.length) return;
+    this.viewer = { kind: "diff", projectId: s.projectId, turnId, paths: files.map((f) => f.path), index, sessionKey: s.key, scope: "turn" };
+  }
+
+  /** Opens the review of every turn of a session that is not undone. */
+  reviewSession(s: Session | undefined = this.session) {
+    if (!s) return;
+    const items = reviewItems(s.entries, null);
+    if (!items.length) {
+      this.flash(t("review.nothing"));
+      return;
+    }
+    const last = items[items.length - 1].turnId;
+    this.viewer = { kind: "diff", projectId: s.projectId, turnId: last, paths: [], index: 0, sessionKey: s.key, scope: "session" };
   }
 
   // Turn actions

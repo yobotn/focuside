@@ -8,6 +8,8 @@
   import { relTo } from "../stores/session.svelte";
   import { applyTheme, type Theme } from "../theme.svelte";
   import { reportIssue, updates } from "../updates.svelte";
+  import type { NotifyMode } from "../review";
+  import { playChime } from "../sound";
 
   const info = $derived({ version: app.env?.version, os: app.env?.os });
   const status = $derived.by(() => {
@@ -212,12 +214,38 @@
       />
 
       <label for="s-notify">{t("settings.notifications")}</label>
-      <input
+      <select
         id="s-notify"
-        type="checkbox"
-        checked={app.settings.notifications}
+        value={app.settings.notify}
         onchange={(e) => {
-          app.settings.notifications = e.currentTarget.checked;
+          app.settings.notify = e.currentTarget.value as NotifyMode;
+          app.save();
+        }}
+      >
+        <option value="never">{t("settings.notify.never")}</option>
+        <option value="background">{t("settings.notify.background")}</option>
+        <option value="always">{t("settings.notify.always")}</option>
+      </select>
+
+      <label for="s-sound">{t("settings.sound")}</label>
+      <input
+        id="s-sound"
+        type="checkbox"
+        checked={app.settings.notifySound}
+        onchange={(e) => {
+          app.settings.notifySound = e.currentTarget.checked;
+          if (e.currentTarget.checked) playChime();
+          app.save();
+        }}
+      />
+
+      <label for="s-status">{t("settings.statusBar")}</label>
+      <input
+        id="s-status"
+        type="checkbox"
+        checked={app.settings.statusBar}
+        onchange={(e) => {
+          app.settings.statusBar = e.currentTarget.checked;
           app.save();
         }}
       />

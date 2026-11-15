@@ -1,7 +1,7 @@
 // Typed wrappers around the Tauri commands.
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { FileVersions, ProjectInfo, UndoOutcome, UndoPreview } from "./types";
+import type { FileDiff, FileVersions, ProjectInfo, UndoOutcome, UndoPreview } from "./types";
 
 export interface AgentInfo {
   id: string;
@@ -92,8 +92,14 @@ export const api = {
   undo: (projectId: string, turnId: string, revertAnyway: string[]) =>
     invoke<UndoOutcome>("turn_undo", { projectId, turnId, revertAnyway }),
   redo: (projectId: string, turnId: string) => invoke<UndoOutcome>("turn_redo", { projectId, turnId }),
-  revertFile: (projectId: string, turnId: string, path: string) =>
-    invoke<UndoOutcome>("turn_revert_file", { projectId, turnId, path }),
+  /** Undo file. Without `force` it rejects with "changedSince" when the file changed after the turn. */
+  revertFile: (projectId: string, turnId: string, path: string, force = false) =>
+    invoke<UndoOutcome>("turn_revert_file", { projectId, turnId, path, force }),
+  /** Both versions of a file in a turn, its hunks and their state on disk. */
+  fileDiff: (projectId: string, turnId: string, path: string) => invoke<FileDiff>("turn_file_diff", { projectId, turnId, path }),
+  /** Undo change: one hunk back. Rejects with "changedSince" when those lines changed after the turn. */
+  undoHunk: (projectId: string, turnId: string, path: string, index: number) =>
+    invoke<FileDiff>("turn_undo_hunk", { projectId, turnId, path, index }),
   fileVersions: (projectId: string, turnId: string, path: string) =>
     invoke<FileVersions>("turn_file_versions", { projectId, turnId, path }),
 

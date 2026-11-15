@@ -134,6 +134,13 @@ export const highlight = syntaxHighlighting(
   ]),
 );
 
+/** The language name for a file name ("TypeScript"), or null when none is known. */
+export function languageName(path: string): string | null {
+  const name = path.split("/").pop() ?? path;
+  if (name.endsWith(".svelte")) return "Svelte";
+  return LanguageDescription.matchFilename(languages, name)?.name ?? null;
+}
+
 /** Language support for a file name, loaded lazily. */
 export async function languageFor(path: string): Promise<Extension | null> {
   const name = path.split("/").pop() ?? path;

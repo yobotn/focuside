@@ -26,6 +26,8 @@ export interface SavedTurn {
   prompt: number;
   /** Chat: the start of that user message, to find it again in the replayed history. */
   text?: string;
+  /** Files the user kept (reviewed). Missing in turns saved before reviews: they count as reviewed. */
+  reviewed?: string[];
 }
 
 export const MAX_TURNS = 100;
@@ -80,6 +82,7 @@ export function turnsOf(entries: Entry[], copy: <T>(x: T) => T = (x) => x): Save
     } else if ((e.t === "changes" || e.t === "plan") && e.turnId && hasChanges(e.result)) {
       const turn: SavedTurn = { turnId: e.turnId, result: copy(e.result), undo: e.undo ? copy(e.undo) : null, prompt };
       if (prompt >= 0) turn.text = text;
+      if (e.reviewed) turn.reviewed = [...e.reviewed];
       out.push(turn);
     }
   }
@@ -91,7 +94,12 @@ export function loadTurns(raw: unknown): SavedTurn[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((x): x is SavedTurn => !!x && typeof x === "object" && typeof x.turnId === "string" && hasChanges(x.result))
-    .map((x) => ({ ...x, prompt: typeof x.prompt === "number" ? x.prompt : -1, undo: x.undo ?? null }))
+    .map((x) => {
+      const t: SavedTurn = { ...x, prompt: typeof x.prompt === "number" ? x.prompt : -1, undo: x.undo ?? null };
+      if (Array.isArray(x.reviewed)) t.reviewed = x.reviewed.filter((p) => typeof p === "string");
+      else delete t.reviewed;
+      return t;
+    })
     .slice(-MAX_TURNS);
 }
 
@@ -110,6 +118,7 @@ export function placeTurns(entries: Entry[], turns: SavedTurn[], newId: () => st
     let at = x.prompt >= 0 && same(users[x.prompt]) ? x.prompt : -1;
     if (at < 0 && x.prompt >= 0 && x.text) at = users.findIndex((i) => same(i));
     const card: Entry = { t: "changes", id: newId(), turnId: x.turnId, result: x.result, undo: x.undo ?? null };
+    if (x.reviewed) card.reviewed = x.reviewed;
     const next = at >= 0 ? users[at + 1] : undefined;
     if (at >= 0 && next !== undefined) entries.splice(next, 0, card);
     else entries.push(card);

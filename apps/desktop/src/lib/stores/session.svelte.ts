@@ -3,6 +3,7 @@
 import type { SessionEvent } from "../api";
 import { t } from "../i18n";
 import { hasChanges, loadTurns, MAX_TURNS, placeTurns, turnsOf, type SavedTurn } from "../restore";
+import { tabState, unreviewedCount, type TabState } from "../review";
 import type {
   AgentCommand,
   ConfigOption,
@@ -183,6 +184,12 @@ export class Session {
   turnId = $state<string | null>(null);
   stopping = $state(false);
   waiting = $state<Waiting>(null);
+  /** When the running turn or pane prompt started (ms), else null. */
+  busySince = $state<number | null>(null);
+  /** The last finished run, for "Done in 2m 10s". */
+  lastRun = $state<{ start: number; end: number } | null>(null);
+  /** Pane: the turn that just ended was a StopFailure. */
+  private runFailed = false;
   thinking = $state(false);
   todo = $state<{ content: string; status: string }[]>([]);
   usage = $state<{ used: number; size: number } | null>(null);
@@ -258,7 +265,7 @@ export class Session {
     const turns = loadTurns(v.turns);
     if (!turns.length || this.entries.some((e) => e.t === "changes")) return;
     if (this.mode === "pane") {
-      for (const x of turns) this.entries.push({ t: "changes", id: nid(), turnId: x.turnId, result: x.result, undo: x.undo ?? null });
+      for (const x of turns) this.entries.push({ t: "changes", id: nid(), turnId: x.turnId, result: x.result, undo: x.undo ?? null, ...(x.reviewed ? { reviewed: x.reviewed } : {}) });
     } else {
       this.pendingTurns = turns;
     }
@@ -339,6 +346,26 @@ export class Session {
 
   get model(): ConfigOption | undefined {
     return this.configOptions.find((o) => o.id === "model" || o.category === "model");
+  }
+
+  /** A run (a turn or a pane prompt) started: for the elapsed time in the tab and status bar. */
+  private startRun() {
+    if (this.busySince === null) this.busySince = Date.now();
+  }
+
+  private endRun() {
+    if (this.busySince !== null) this.lastRun = { start: this.busySince, end: Date.now() };
+    this.busySince = null;
+  }
+
+  /** Files of this session's turns that are not undone and not kept yet. */
+  get unreviewed(): number {
+    return unreviewedCount(this.entries);
+  }
+
+  /** What the session tab and the status bar show (lib/review.ts). */
+  get tabState(): TabState {
+    return tabState({ dormant: this.dormant, busy: this.busy, waiting: this.waiting, status: this.status, unreviewed: this.unreviewed });
   }
 
   /** Working on a prompt: a chat turn, or a pane prompt that hooks reported. For the tabs. */
@@ -504,6 +531,7 @@ export class Session {
       }
       case "turn_started": {
         this.running = true;
+        this.startRun();
         this.stopping = false;
         this.turnId = e.turnId;
         this.todo = [];
@@ -677,6 +705,7 @@ export class Session {
     // The changes cards are kept in app data (saved shortly after, see app.saveSessionData).
     if (hasChanges(r)) this.changed();
     this.running = false;
+    this.endRun();
     this.stopping = false;
     this.thinking = false;
     this.turnId = null;
@@ -690,7 +719,7 @@ export class Session {
       // ("Open Claude pane"); the turn leaves no card and no error line.
       const idx = this.entries.findLastIndex((x) => x.t === "plan" && x.turnId === r.turnId && (x.state === "planning" || x.state === "waiting"));
       if (idx >= 0) this.entries.splice(idx, 1);
-      if (r.hasSnapshot && r.changes?.files.length) this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
+      if (r.hasSnapshot && r.changes?.files.length) this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null, reviewed: [] });
       this.waiting = null;
       return "none";
     }
@@ -699,12 +728,14 @@ export class Session {
     if (plan && plan.t === "plan") {
       if (plan.state === "running") {
         plan.result = r;
+        plan.reviewed = [];
         if (r.stopReason === "cancelled") plan.state = "paused";
         else plan.state = failed ? "failed" : "done";
       } else if (plan.state === "planning" || plan.state === "waiting") {
         if (failed) {
           plan.state = "failed";
           plan.result = r;
+          plan.reviewed = [];
         } else if (r.stopReason === "cancelled" || plan.state === "waiting") {
           plan.state = "discarded";
         } else {
@@ -712,12 +743,12 @@ export class Session {
           const idx = this.entries.indexOf(plan);
           if (idx >= 0) this.entries.splice(idx, 1);
           if (r.hasSnapshot && r.changes?.files.length) {
-            this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
+            this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null, reviewed: [] });
           }
         }
       }
     } else if (r.hasSnapshot && (r.changes?.files.length || r.changes?.generated.length)) {
-      this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
+      this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null, reviewed: [] });
     }
     if (r.stopReason === "cancelled" && !(plan && plan.t === "plan" && plan.state === "paused")) {
       // Plan discards show their own line.
@@ -764,6 +795,7 @@ export class Session {
       case "pane_exited":
         this.paneAlive = false;
         this.paneWorking = false;
+        this.endRun();
         this.tracking = "off";
         this.turnId = null;
         // The resumed TUI exited with an error at once. The app starts a fresh one.
@@ -777,15 +809,25 @@ export class Session {
         break;
       case "pane_working":
         this.paneWorking = true;
+        this.startRun();
         break;
       case "pane_idle": {
+        // A prompt that ran ends here (Stop or StopFailure); the idle event at start has no run.
+        const ran = this.busySince !== null;
         this.paneWorking = false;
+        this.endRun();
         if (this.tracking !== "error") this.tracking = "waiting";
         this.turnId = null;
         const last = this.prompts[this.prompts.length - 1];
         if (last && typeof e.lastMessage === "string" && last.answer === null) {
           last.answer = e.lastMessage;
           this.changed();
+        }
+        if (ran) {
+          const w: Waiting = typeof e.failure === "string" || this.runFailed ? "failed" : "done";
+          this.runFailed = false;
+          this.waiting = w;
+          return w;
         }
         break;
       }
@@ -853,7 +895,7 @@ export class Session {
         this.turnId = null;
         this.updated = Date.now();
         if (hasChanges(r)) {
-          this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null });
+          this.entries.push({ t: "changes", id: nid(), turnId: r.turnId, result: r, undo: null, reviewed: [] });
           this.changed();
         }
         const turn = this.prompts.findLast((x) => x.turnId === r.turnId);
@@ -861,6 +903,8 @@ export class Session {
           turn.result = $state.snapshot(r) as TurnResult;
           this.changed();
         }
+        // StopFailure: pane_idle comes right after and marks the session failed.
+        this.runFailed = r.failure != null;
         if (r.failure != null) this.note(r.failure ? t("pane.stopFailure", { error: r.failure }) : t("pane.stopFailureUnknown"), "warn");
         if (r.snapshotError) this.note(t("changes.snapshotFailed", { error: r.snapshotError }), "error");
         break;

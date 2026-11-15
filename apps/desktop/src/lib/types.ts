@@ -73,6 +73,31 @@ export interface UndoOutcome {
   exact: boolean;
 }
 
+export type HunkState = "agent" | "undone" | "changed";
+
+/** One run of changed lines (crates/core/src/hunks.rs). Lines are 0-based. */
+export interface Hunk {
+  oldStart: number;
+  oldLen: number;
+  newStart: number;
+  newLen: number;
+  state: HunkState;
+}
+
+/** One file of a turn for the review (hunks::FileDiff). */
+export interface FileDiff {
+  path: string;
+  oldPath?: string;
+  binary: boolean;
+  before: string | null;
+  after: string | null;
+  hunks: Hunk[];
+  /** The file on disk against the turn's end. */
+  current: "agent" | "changed" | "missing";
+  /** Undo change works per hunk (both versions are text). */
+  hunkUndo: boolean;
+}
+
 export interface FileVersions {
   path: string;
   before: string | null;
@@ -193,8 +218,10 @@ export type Entry =
       outside: OutOfPlan[];
       result: TurnResult | null;
       undo: UndoState | null;
+      /** Files the user marked as reviewed (Keep). Missing: a turn from before reviews. */
+      reviewed?: string[];
     }
-  | { t: "changes"; id: string; turnId: string; result: TurnResult; undo: UndoState | null }
+  | { t: "changes"; id: string; turnId: string; result: TurnResult; undo: UndoState | null; reviewed?: string[] }
   /** A pane plan from the ExitPlanMode hook. Approval happens in the agent's TUI. */
   | { t: "panePlan"; id: string; turnId: string | null; text: string; plan: ParsedPlan; approved: boolean }
   | { t: "note"; id: string; text: string; tone: "muted" | "error" | "warn" };

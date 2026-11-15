@@ -34,6 +34,11 @@
   import { dock, dockHost } from "./lib/stores/dock.svelte";
   import PromptsPanel from "./lib/components/PromptsPanel.svelte";
   import { DEFAULT_BOTTOM, DEFAULT_WIDTH, MIN_WIDTH, fillGroup, shownPanel, type DockGroup as Group, type PanelId } from "./lib/dock";
+  import StatusBar from "./lib/components/StatusBar.svelte";
+  import ShortcutsSheet from "./lib/components/ShortcutsSheet.svelte";
+  import { statusBar } from "./lib/stores/statusbar.svelte";
+  import { keysOf } from "./lib/keys";
+  import { sessionFiles, withRecent } from "./lib/review";
 
   let conversation: Conversation | undefined = $state();
   let messageBox: MessageBox | undefined = $state();
@@ -42,6 +47,7 @@
   onMount(() => {
     app.init();
     editor.init();
+    statusBar.start();
     const un = getCurrentWebview().onDragDropEvent((e) => {
       if (e.payload.type === "drop") {
         // Folders open as projects. Files are left to the message box (images).
@@ -178,8 +184,21 @@
     if (s && lastDone && (lastDone.t === "changes" || lastDone.t === "plan"))
       items.push({ id: "undo", label: t("cmd.undoTurn"), run: () => app.askUndo(s, lastDone) });
     if (app.lastUndo) items.push({ id: "redo", label: t("cmd.redoUndo"), run: () => app.redo() });
+    if (s && sessionFiles(s.entries).length) items.push({ id: "reviewSession", label: t("cmd.reviewSession"), run: () => app.reviewSession(s) });
+    items.push({ id: "shortcuts", label: t("keys.title"), run: () => (app.overlay = "shortcuts") });
+    items.push({
+      id: "statusBar",
+      label: t("cmd.statusBar"),
+      run: () => {
+        app.settings.statusBar = !app.settings.statusBar;
+        app.save();
+      },
+    });
     if (project) items.push({ id: "close", label: t("cmd.closeProject"), run: () => app.closeProject(project.id) });
-    return items;
+    // Each row shows its keys (lib/keys.ts). Recent commands come first.
+    for (const it of items) if (!it.hint && keysOf(it.id).length) it.hint = keyLabel(keysOf(it.id)[0]);
+    const { recent, rest } = withRecent(items, app.recentCommands);
+    return [...recent.map((it) => ({ ...it, detail: it.detail || t("palette.recent") })), ...rest];
   });
 
   /** Palette commands for the editor tabs, when the project has some. */
@@ -307,6 +326,8 @@
     if (inTerminal(target) && !(mod(e) && e.key === "`") && !(e.ctrlKey && e.shiftKey) && !(e.ctrlKey && e.key === "Tab")) return;
     const k = e.key.toLowerCase();
     if (mod(e) && !e.shiftKey && k === "k") app.overlay = app.overlay === "palette" ? null : "palette";
+    // Mod+/: the keyboard shortcuts. In editable text CodeMirror takes it first (toggle comment).
+    else if (mod(e) && !e.altKey && e.key === "/" && !e.defaultPrevented) app.overlay = app.overlay === "shortcuts" ? null : "shortcuts";
     else if (mod(e) && e.shiftKey && !e.altKey && k === "p") app.overlay = app.overlay === "palette" ? null : "palette";
     else if (mod(e) && !e.shiftKey && k === "p") app.overlay = "openFile";
     else if (mod(e) && e.shiftKey && k === "f") openSearch();
@@ -356,7 +377,9 @@
 
 <svelte:window {onkeydown} bind:innerWidth={winW} />
 
-<div class="app" class:mac={isMac} style="--project: {projectColor}">
+<!-- The window: the app above, the status bar below. -->
+<div class="shell" style="--project: {projectColor}">
+<div class="app" class:mac={isMac}>
   {#if app.projects.length}
     <Rail />
   {/if}
@@ -464,6 +487,10 @@
     {#if dock.dragging}<DockOverlay />{/if}
   {/if}
 </div>
+{#if app.ready && app.settings.statusBar && project}
+  <StatusBar />
+{/if}
+</div>
 
 {#if app.overlay === "queue"}
   <ListOverlay title={t("queue.title")} items={queueItems} searchable={false} empty={t("queue.empty")} onclose={() => (app.overlay = null)} />
@@ -472,7 +499,9 @@
 {:else if app.overlay === "new"}
   <ListOverlay placeholder={t("session.new")} items={newItems} empty={t("palette.empty")} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "palette"}
-  <ListOverlay placeholder={t("palette.placeholder")} items={paletteItems} onclose={() => (app.overlay = null)} />
+  <ListOverlay placeholder={t("palette.placeholder")} items={paletteItems} onclose={() => (app.overlay = null)} onpick={(it) => app.ranCommand(it.id)} />
+{:else if app.overlay === "shortcuts"}
+  <ShortcutsSheet onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "openFile" && project}
   <QuickOpen {project} onclose={() => (app.overlay = null)} />
 {:else if app.overlay === "model"}
@@ -498,9 +527,15 @@
 {/if}
 
 <style>
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
   .app {
     display: flex;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     background: var(--bg);
   }
   .work {

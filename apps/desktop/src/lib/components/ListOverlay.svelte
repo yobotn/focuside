@@ -25,6 +25,7 @@
     searchable = true,
     mono = false,
     onclose,
+    onpick,
   }: {
     title?: string;
     placeholder?: string;
@@ -33,6 +34,8 @@
     searchable?: boolean;
     mono?: boolean;
     onclose: () => void;
+    /** Called with the item before it runs (the palette keeps recent commands). */
+    onpick?: (item: ListItem) => void;
   } = $props();
 
   let query = $state("");
@@ -58,6 +61,7 @@
     const it = shown[i];
     if (!it) return;
     onclose();
+    onpick?.(it);
     it.run();
   }
 

@@ -1,16 +1,15 @@
 <script lang="ts">
   // The viewer: editor tabs (stores/editor.svelte.ts), breadcrumbs, and the open file in
-  // CodeMirror, rendered Markdown, an image or a PDF. The diff tab shows a turn's changes.
-  // Ctrl+Page Up and Page Down switch tabs while the focus is in the viewer.
+  // CodeMirror, rendered Markdown, an image or a PDF. The diff tab shows the review of a turn's
+  // changes (ReviewView). Ctrl+Page Up and Page Down switch tabs while the focus is in the viewer.
   import { invoke } from "@tauri-apps/api/core";
   import { openPath } from "@tauri-apps/plugin-opener";
-  import { ArrowCounterClockwise, CaretLeft, CaretRight, X } from "phosphor-svelte";
-  import { api, errText } from "../api";
+  import { X } from "phosphor-svelte";
+  import { errText } from "../api";
   import { formatSize } from "../editor";
   import { t } from "../i18n";
   import { keyLabel } from "../platform";
   import { app, type Project } from "../stores/app.svelte";
-  import type { FileVersions } from "../types";
   import { dock } from "../stores/dock.svelte";
   import { editor } from "../stores/editor.svelte";
   import Breadcrumbs from "./Breadcrumbs.svelte";
@@ -20,6 +19,7 @@
   import ImageView from "./ImageView.svelte";
   import Markdown from "./Markdown.svelte";
   import PdfView from "./PdfView.svelte";
+  import ReviewView from "./ReviewView.svelte";
   import { imageBlob, mediaKind, mediaLimit } from "../media";
 
   let { project }: { project: Project } = $props();
@@ -29,7 +29,7 @@
   const fileTab = $derived(tab?.kind === "file" ? tab : null);
   const diffTab = $derived(tab?.kind === "diff" ? tab : null);
   const doc = $derived(fileTab && w ? w.docs[fileTab.path] : undefined);
-  const path = $derived(fileTab ? fileTab.path : diffTab ? (diffTab.paths[diffTab.index] ?? "") : "");
+  const path = $derived(fileTab ? fileTab.path : "");
   const content = $derived(doc?.content ?? null);
   const isMd = $derived(/\.(md|markdown|mdx)$/i.test(path));
   const isSvg = $derived(/\.svg$/i.test(path));
@@ -38,12 +38,9 @@
   /** Markdown and SVG files show rendered; this set holds the files switched to source. */
   let sourceOf = $state<Record<string, boolean>>({});
   const source = $derived(!!sourceOf[path]);
-  let versions = $state<FileVersions | null>(null);
-  let diffError = $state<string | null>(null);
-  // Image or PDF bytes for the file view, and both sides of a changed image in the diff view.
+  // Image or PDF bytes for the file view.
   let mediaData = $state.raw<{ path: string; rev: number; buf: ArrayBuffer } | null>(null);
   let mediaError = $state<string | null>(null);
-  let diffImages = $state.raw<{ before: Blob | null; after: Blob | null } | null>(null);
 
   const dirty = $derived(!!doc?.dirty);
 
@@ -72,64 +69,15 @@
       });
   });
 
-  async function loadDiff(turnId: string, p: string) {
-    diffError = null;
-    versions = null;
-    diffImages = null;
-    try {
-      const r = await api.fileVersions(project.id, turnId, p);
-      if (r.binary && mediaKind(p) === "image") {
-        const side = (after: boolean) =>
-          invoke<ArrayBuffer>("turn_file_bytes", { projectId: project.id, turnId, path: p, after }).then(
-            (b) => imageBlob(p, b),
-            () => null,
-          );
-        const [before, after] = await Promise.all([side(false), side(true)]);
-        if (p === path && (before || after)) diffImages = { before, after };
-      }
-      if (p === path) versions = r;
-    } catch (e) {
-      diffError = errText(e);
-    }
-  }
-
-  $effect(() => {
-    const d = diffTab;
-    if (d) loadDiff(d.turnId, d.paths[d.index]);
-  });
-
-  function step(d: number) {
-    if (w && diffTab) editor.stepDiff(w, diffTab.index + d);
-  }
-
-  async function revertFile() {
-    if (!diffTab) return;
-    const p = diffTab.paths[diffTab.index];
-    try {
-      const out = await api.revertFile(project.id, diffTab.turnId, p);
-      app.flash(out.failed.length ? out.failed[0][1] : t("undo.revertFileDone", { path: p }), out.failed.length ? "error" : "muted");
-    } catch (e) {
-      app.flash(errText(e), "error");
-    }
-  }
-
   function onkeydown(e: KeyboardEvent) {
     // Ctrl+Page Up and Page Down: the previous or next editor tab (Ctrl on every OS, as in
-    // VS Code). Ctrl+Shift+Page Up and Page Down stay with the session tabs.
+    // VS Code). Ctrl+Shift+Page Up and Page Down stay with the session tabs. The review
+    // (ReviewView) has its own keys.
     if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && (e.key === "PageUp" || e.key === "PageDown") && w) {
       e.preventDefault();
       e.stopPropagation();
       editor.cycle(w, e.key === "PageUp" ? -1 : 1);
-      return;
     }
-    if (!diffTab) return;
-    const el = e.target as HTMLElement | null;
-    const typing = !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable);
-    if (typing || e.ctrlKey || e.metaKey || e.altKey || app.overlay || app.undoTarget) return;
-    if (e.key === "j" || e.key === "J") step(1);
-    else if (e.key === "k" || e.key === "K") step(-1);
-    else return;
-    e.preventDefault();
   }
 
   function close() {
@@ -169,16 +117,6 @@
         <button class="btn h-6" onclick={() => editor.saveActive()} title={keyLabel("Mod+S")}>{t("common.save")}</button>
       {/if}
     </div>
-  {:else if diffTab}
-    <div class="bar">
-      <span class="text-fg-muted">{t("viewer.diff")}</span>
-      <span class="truncate font-medium" title={path}>{path}</span>
-      <span class="flex-1"></span>
-      <span class="text-fg-muted">{t("viewer.diffOf", { index: diffTab.index + 1, count: diffTab.paths.length })}</span>
-      <button class="icon-btn" onclick={() => step(-1)} disabled={diffTab.index === 0} title="{t('viewer.prevFile')} (K)" aria-label={t("viewer.prevFile")}><CaretLeft size={14} /></button>
-      <button class="icon-btn" onclick={() => step(1)} disabled={diffTab.index >= diffTab.paths.length - 1} title="{t('viewer.nextFile')} (J)" aria-label={t("viewer.nextFile")}><CaretRight size={14} /></button>
-      <button class="btn h-6" onclick={revertFile} title={t("undo.revertFile")}><ArrowCounterClockwise size={13} />{t("undo.revertFile")}</button>
-    </div>
   {/if}
 
   {#if doc?.disk && w}
@@ -202,31 +140,7 @@
 
   <div class="body">
     {#if diffTab}
-      {#if diffError}
-        <p class="p-4 text-danger selectable">{diffError}</p>
-      {:else if !versions}
-        <p class="p-4 text-fg-muted">{t("common.loading")}</p>
-      {:else if versions.binary && diffImages}
-        <div class="sides">
-          {#each [{ label: t("viewer.before"), blob: diffImages.before }, { label: t("viewer.after"), blob: diffImages.after }] as side (side.label)}
-            <div class="side">
-              <p class="side-label">{side.label}</p>
-              {#if side.blob}
-                <ImageView blob={side.blob} label="{side.label}: {name}" compact />
-              {:else}
-                <p class="p-4 text-fg-muted">{t("viewer.noVersion")}</p>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      {:else if versions.binary}
-        <p class="p-4 text-fg-muted">{t("viewer.binary", { size: "" })}</p>
-      {:else if versions.after === null}
-        <p class="px-4 pt-3 text-fg-muted">{t("viewer.deleted")}</p>
-        <CodeEditor {path} text={versions.before ?? ""} readonly />
-      {:else}
-        <CodeEditor {path} text={versions.after} original={versions.before ?? ""} readonly />
-      {/if}
+      <ReviewView {project} tab={diffTab} />
     {:else if !doc}
       <p class="p-4 text-fg-muted">{t("viewer.noFile")}</p>
     {:else if doc.error}
@@ -328,27 +242,6 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
-  }
-  .sides {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1px;
-    background: var(--border);
-  }
-  .side {
-    display: flex;
-    flex-direction: column;
-    min-height: 200px;
-    min-width: 0;
-    background: var(--bg);
-  }
-  .side-label {
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--border);
-    color: var(--fg-muted);
-    font-size: 12px;
   }
   .md {
     padding: 20px 28px 40px;

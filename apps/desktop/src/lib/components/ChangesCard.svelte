@@ -5,6 +5,8 @@
   import { Session } from "../stores/session.svelte";
   import { app } from "../stores/app.svelte";
   import FileIcon from "./FileIcon.svelte";
+  import { ArrowCounterClockwise, Check } from "phosphor-svelte";
+  import { isReviewed } from "../review";
 
   let {
     session,
@@ -38,6 +40,7 @@
     return status === "create" ? t("plan.change.create") : status === "delete" ? t("plan.change.delete") : status === "rename" ? t("plan.change.rename") : t("plan.change.edit");
   }
 
+  /** Opens the review of this turn (every file stacked) at file `index`. */
   export function review(index = 0) {
     if (!files.length) return;
     app.viewer = {
@@ -47,7 +50,19 @@
       paths: files.map((f) => f.path),
       index,
       sessionKey: session.key,
+      scope: "turn",
     };
+  }
+
+  // Keep (reviewed) and Undo file per row. Turns from before reviews count as kept.
+  const entry = $derived(app.turnEntry(session, result.turnId));
+  const kept = (path: string) => !!entry && isReviewed(entry, path);
+  const allKept = $derived(files.every((f) => kept(f.path)));
+  let undoing = $state<string | null>(null);
+  async function undoFile(path: string) {
+    undoing = path;
+    await app.undoFile(session, session.projectId, result.turnId, path);
+    undoing = null;
   }
 
   function notCoveredText(n: { path: string; why: string }) {
@@ -85,7 +100,7 @@
     <ul class="rows selectable">
       {#each files as f, i (f.path)}
         {@const reason = Session.notInPlan(plan, outside, f.path)}
-        <li class:amber={reason !== null}>
+        <li class="line" class:amber={reason !== null}>
           <button class="row" onclick={() => review(i)} title={f.path}>
             <span class="w-14 shrink-0 text-fg-muted">{word(f.status)}</span>
             <FileIcon path={f.path} />
@@ -102,6 +117,23 @@
               <span class="note truncate">{reason ? t("plan.notInPlanReason", { reason }) : t("plan.notInPlan")}</span>
             {/if}
           </button>
+          {#if !undo && entry}
+            <span class="acts">
+              <button class="act" onclick={() => undoFile(f.path)} disabled={undoing === f.path} title={t("review.undoFile")} aria-label="{t('review.undoFile')}: {f.path}">
+                <ArrowCounterClockwise size={13} />
+              </button>
+              <button
+                class="act keep"
+                class:on={!!entry.reviewed && kept(f.path)}
+                aria-pressed={kept(f.path)}
+                onclick={() => app.setReviewed(session, result.turnId, f.path, !kept(f.path))}
+                title={kept(f.path) ? t("review.kept") : t("review.keep")}
+                aria-label="{kept(f.path) ? t('review.kept') : t('review.keep')}: {f.path}"
+              >
+                <Check size={13} />{kept(f.path) ? t("review.kept") : t("review.keep")}
+              </button>
+            </span>
+          {/if}
         </li>
       {/each}
       {#each changes?.generated ?? [] as g (g.folder)}
@@ -165,6 +197,9 @@
       {#if files.length || changes?.generated.length}
         <button class="btn" onclick={onundo} title={keyLabel("U")}>{t("changes.undo")} <span class="kbd">U</span></button>
       {/if}
+      {#if entry && files.length > 1 && !allKept}
+        <button class="btn ms-auto" onclick={() => app.keepAll(session, result.turnId)}><Check size={13} />{t("review.keepAll")}</button>
+      {/if}
     {/if}
   </div>
 </div>
@@ -206,6 +241,54 @@
   }
   button.row:hover {
     background: var(--bg-hover);
+  }
+  .line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+  .line > .row {
+    flex: 1;
+    min-width: 0;
+  }
+  .line:hover {
+    background: var(--bg-hover);
+  }
+  .line:hover > .row:hover {
+    background: transparent;
+  }
+  .acts {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding-inline-end: 8px;
+    flex-shrink: 0;
+  }
+  .act {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 22px;
+    min-width: 22px;
+    padding: 0 5px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fg-muted);
+    font-size: 12px;
+    opacity: 0;
+  }
+  .line:hover .act,
+  .act:focus-visible,
+  .act.on {
+    opacity: 1;
+  }
+  .act:hover {
+    background: var(--bg-active);
+    color: var(--fg);
+  }
+  .act.keep.on {
+    color: var(--accent);
   }
   .path {
     min-width: 0;
