@@ -26,12 +26,15 @@
 </script>
 
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import { basicSetup } from "codemirror";
   import { unifiedMergeView } from "@codemirror/merge";
   import { highlight, languageFor, minimalChange, phrases, theme } from "../editor";
   import { findExtension } from "../findPanel";
   import { editor, type Doc, type ViewPos } from "../stores/editor.svelte";
+  import { api } from "../api";
+  import { git } from "../stores/git.svelte";
+  import { gitGutter, setGitBase } from "../gitGutter";
 
   let {
     path = "",
@@ -66,7 +69,7 @@
   let lastRev = -1;
   let posTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function makeState(content: string, p: string, ro: boolean, orig: string | null, pos: ViewPos | null): EditorState {
+  function makeState(content: string, p: string, ro: boolean, orig: string | null, pos: ViewPos | null, file = false): EditorState {
     const ext: Extension[] = [
       basicSetup,
       findExtension(),
@@ -80,6 +83,8 @@
       saveKeys,
       listener,
     ];
+    // Open files of editor tabs mark the lines changed against HEAD.
+    if (file) ext.push(gitGutter());
     if (orig !== null) {
       ext.push(
         unifiedMergeView({
@@ -155,17 +160,30 @@
     const fresh = !d.state;
     // Switching tabs from the keyboard (Ctrl+Page Down) keeps the focus in the text.
     const focused = view.hasFocus;
-    view.setState(d.state ?? makeState(d.text, d.path, false, null, d.pos));
+    view.setState(d.state ?? makeState(d.text, d.path, false, null, d.pos, true));
     if (focused) view.focus();
     d.state = null;
     lastRev = d.rev;
     if (view.state.doc.toString() !== d.text) applyText(d.text);
     if (fresh) loadLanguage(d.path);
+    loadGitBase();
     editor.view = view;
     if (!applyJump()) {
       const top = Math.min(d.pos?.top ?? 0, view.state.doc.length);
       view.dispatch({ effects: EditorView.scrollIntoView(top, { y: "start" }) });
     }
+  }
+
+  /** The HEAD text of the shown file for the change markers (null: no markers). */
+  function loadGitBase() {
+    const d = shown;
+    if (!view || !d || !projectId) return;
+    const st = git.projectId === projectId ? git.status : null;
+    const set = (text: string | null) => {
+      if (view && shown === d) view.dispatch({ effects: setGitBase.of(text) });
+    };
+    if (!st?.repo) return set(null);
+    api.gitHeadText(projectId, git.repoPath(d.path)).then(set, () => set(null));
   }
 
   function buildPlain() {
@@ -224,6 +242,13 @@
   $effect(() => {
     void editor.jump;
     if (ready && doc) applyJump();
+  });
+  const gitRepo = $derived(git.projectId === projectId && !!git.status?.repo);
+  // HEAD moved (commit, branch switch, pull) or the repository appeared: new markers.
+  $effect(() => {
+    void git.headVersion;
+    void gitRepo;
+    if (ready && doc) untrack(() => loadGitBase());
   });
 
   // Plain mode: rebuild when the file or the diff base changes.

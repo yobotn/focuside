@@ -6,6 +6,7 @@ import { tick, untrack } from "svelte";
 import { defaultDock, findPanel, isNoop, movePanel, normalizeDock, shownPanel, type DropTarget, type PanelId, type Zone } from "../dock";
 import { app } from "./app.svelte";
 import { search } from "./search.svelte";
+import { git } from "./git.svelte";
 
 /** A place the dragged panel can land, in window pixels. */
 export interface DropZone {
@@ -33,6 +34,7 @@ class DockStore {
     if (p === "session") return true;
     if (p === "side") return app.filesVisible;
     if (p === "search") return search.visible;
+    if (p === "git") return git.visible;
     if (p === "viewer") return !!app.viewer && app.viewer.projectId === project.id;
     if (p === "plan") return app.planVisible;
     if (p === "prompts") return app.promptsVisible;
@@ -49,6 +51,7 @@ class DockStore {
   open(p: PanelId) {
     if (p === "side") app.filesVisible = true;
     else if (p === "search") search.visible = true;
+    else if (p === "git") git.visible = true;
     else if (p === "plan") app.planVisible = true;
     else if (p === "prompts") app.promptsVisible = true;
     else if (p === "terminal") app.terminalVisible = true;
@@ -87,6 +90,7 @@ class DockStore {
     if (p === "session") return;
     if (p === "side") app.filesVisible = false;
     else if (p === "search") search.visible = false;
+    else if (p === "git") git.visible = false;
     else if (p === "plan") app.planVisible = false;
     else if (p === "prompts") app.promptsVisible = false;
     else if (p === "terminal") app.terminalVisible = false;

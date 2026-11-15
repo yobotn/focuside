@@ -8,6 +8,7 @@
   import SessionTab from "./SessionTab.svelte";
   import DockGrip from "./DockGrip.svelte";
   import { dock } from "../stores/dock.svelte";
+  import { git } from "../stores/git.svelte";
 
   function restart() {
     if (app.projects.some((pr) => pr.sessions.some((x) => x.running || x.paneAlive))) {
@@ -19,6 +20,9 @@
 
   const p = $derived(app.active);
   const s = $derived(app.session);
+  // The branch follows the Git panel's status; before the first read, the one read at open.
+  const gitSt = $derived(p && git.projectId === p.id ? git.status : null);
+  const branch = $derived(gitSt ? (gitSt.repo ? (gitSt.branch ?? gitSt.head) : null) : (p?.branch ?? null));
   let editing = $state(false);
   let draft = $state("");
   let input: HTMLInputElement | undefined = $state();
@@ -75,8 +79,8 @@
     }}
   >
     <span class="project" style="color: hsl({p.hue} var(--project-s) var(--project-l))">{p.name}</span>
-    {#if p.branch}
-      <span class="item"><GitBranch size={13} />{p.branch}</span>
+    {#if branch}
+      <button class="item branch" title={t("git.switchHint")} onclick={() => (app.overlay = "branch")}><GitBranch size={13} />{branch}</button>
     {/if}
     <span class="sep">.</span>
     {#if top}
@@ -183,6 +187,18 @@
     align-items: center;
     gap: 4px;
     color: var(--fg-muted);
+  }
+  .branch {
+    height: 22px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    white-space: nowrap;
+  }
+  .branch:hover {
+    background: var(--bg-hover);
+    color: var(--fg);
   }
   .link {
     background: none;

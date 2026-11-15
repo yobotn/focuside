@@ -1,21 +1,35 @@
 <script lang="ts">
-  // Projects on top. Below them, after a line, the side bar views (Files and Sessions): click
-  // one to show it, click the one that is shown to hide the side bar. Settings at the bottom.
-  import { Files, Gear, Plus, Stack } from "phosphor-svelte";
+  // Projects on top. Below them, after a line, the side bar views (Files and Sessions) and the
+  // Git panel: click one to show it, click the one that is shown to hide it. The Git icon
+  // shows the number of changed files. Settings at the bottom.
+  import { Files, Gear, GitBranch, Plus, Stack } from "phosphor-svelte";
   import { t } from "../i18n";
   import { keyLabel } from "../platform";
   import { app } from "../stores/app.svelte";
   import { dock } from "../stores/dock.svelte";
+  import { git } from "../stores/git.svelte";
 
-  type View = "files" | "sessions";
+  type View = "files" | "sessions" | "git";
   const views: { id: View; label: string }[] = $derived([
     { id: "files", label: t("files.title") },
     { id: "sessions", label: t("session.list") },
+    { id: "git", label: t("dock.git") },
   ]);
   const shownView = $derived(dock.shown("side") ? app.layout.sideView : null);
   const waiting = $derived(!!app.active && app.projectWaiting(app.active));
+  const changes = $derived(git.projectId === app.activeId && git.status?.repo ? git.count : 0);
+
+  function isOn(v: View): boolean {
+    return v === "git" ? dock.shown("git") : shownView === v;
+  }
 
   function pick(v: View) {
+    if (v === "git") {
+      if (dock.shown("git")) dock.close("git");
+      else dock.open("git");
+      app.save();
+      return;
+    }
     if (shownView === v) {
       dock.close("side");
       return;
@@ -61,19 +75,29 @@
   {#if app.active}
     <div class="views" role="tablist" aria-orientation="vertical" aria-label={t("side.views")}>
       {#each views as v, i (v.id)}
+        {@const on = isOn(v.id)}
         <button
           class="view"
-          class:active={shownView === v.id}
+          class:active={on}
           role="tab"
-          aria-selected={shownView === v.id}
-          aria-label={v.label}
-          title={shownView === v.id ? t("side.hide", { view: v.label, key: keyLabel("Mod+B") }) : v.label}
+          aria-selected={on}
+          aria-label={v.id === "git" && changes ? t("git.railChanges", { view: v.label, count: changes }) : v.label}
+          title={v.id === "git"
+            ? on
+              ? t("git.railHide", { view: v.label })
+              : t("git.railShow", { view: v.label, key: "Ctrl+Shift+G" })
+            : on
+              ? t("side.hide", { view: v.label, key: keyLabel("Mod+B") })
+              : v.label}
           onclick={() => pick(v.id)}
           onkeydown={(e) => onkey(e, i)}
         >
-          {#if v.id === "files"}<Files size={18} />{:else}<Stack size={18} />{/if}
+          {#if v.id === "files"}<Files size={18} />{:else if v.id === "git"}<GitBranch size={18} />{:else}<Stack size={18} />{/if}
           {#if v.id === "sessions" && waiting && shownView !== "sessions"}
             <span class="dot small pulse-warn" aria-hidden="true"></span>
+          {/if}
+          {#if v.id === "git" && changes}
+            <span class="badge" aria-hidden="true">{changes > 99 ? "99+" : changes}</span>
           {/if}
         </button>
       {/each}
@@ -175,6 +199,22 @@
     width: 3px;
     border-radius: 0 3px 3px 0;
     background: var(--fg-muted);
+  }
+  .badge {
+    position: absolute;
+    bottom: 1px;
+    inset-inline-end: 0;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    border-radius: 8px;
+    background: var(--fg-muted);
+    color: var(--bg);
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 15px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
   }
   .dot.small {
     top: 3px;

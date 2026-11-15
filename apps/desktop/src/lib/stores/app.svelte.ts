@@ -15,6 +15,7 @@ import {
   type AgentInfo,
   type ClaudeRouteInfo,
   type EnvCheck,
+  type GitDiffSource,
   type SessionEvent,
 } from "../api";
 import { t, type Key } from "../i18n";
@@ -54,6 +55,9 @@ export interface Settings {
    * to the project root. Claude panes FocusIDE starts get it as `plansDirectory`; snapshots
    * skip it. */
   planFolder: string;
+  /** Git panel: Commit with nothing staged commits all changes without asking (the user picked
+   * "Always commit all" once). */
+  gitCommitAll: boolean;
 }
 
 /** Agents that open in a pane by default and ask once before chat mode. Antigravity: Google's
@@ -129,7 +133,7 @@ const defaults: Persisted = {
   panels: { plan: false, prompts: false, terminal: false },
   planFirst: true,
   history: [],
-  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [], planFolder: "" },
+  settings: { theme: "system", fontSize: 15, shell: "", agent: "claude", agentCommand: "", autoUpdate: true, showIgnored: false, notifications: true, claudeHooks: true, claudeBrief: false, sessionTabs: "top", chatConfirmed: [], planFolder: "", gitCommitAll: false },
   filesVisible: true,
   layout: defaultLayout(),
 };
@@ -139,12 +143,23 @@ export interface Project extends ProjectInfo {
   activeKey: string | null;
 }
 
-export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "settings" | "model" | "new";
+export type Overlay = null | "queue" | "sessions" | "palette" | "openFile" | "settings" | "model" | "new" | "branch";
 
 export type ViewerTarget =
   | null
   | { kind: "file"; projectId: string; path: string }
-  | { kind: "diff"; projectId: string; turnId: string; paths: string[]; index: number; sessionKey: string };
+  | { kind: "diff"; projectId: string; turnId: string; paths: string[]; index: number; sessionKey: string; git?: GitDiff };
+
+/**
+ * A diff of the project's own git repository (Git panel) instead of a turn. Paths of the diff
+ * tab are relative to the repository root; `origs` holds the old path of each renamed file.
+ */
+export interface GitDiff {
+  source: GitDiffSource;
+  origs: (string | null)[];
+  /** A commit's subject, shown in the diff bar. */
+  label?: string;
+}
 
 /** The editor store, which owns the viewer's tabs. */
 export interface ViewerHost {

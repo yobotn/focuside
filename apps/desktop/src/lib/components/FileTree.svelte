@@ -7,6 +7,7 @@
   import { invalidate } from "../files.svelte";
   import { app, type Project } from "../stores/app.svelte";
   import { editor } from "../stores/editor.svelte";
+  import { git } from "../stores/git.svelte";
   import FileIcon from "./FileIcon.svelte";
 
   interface Node {
@@ -141,6 +142,16 @@
   }
 
   const viewing = $derived(app.viewer?.kind === "file" && app.viewer.projectId === project.id ? app.viewer.path : null);
+  // Git letters: M modified, A added, D deleted, U untracked, ! conflict. A folder with changes
+  // gets a dot.
+  const marks = $derived<Record<string, string>>(git.projectId === project.id && git.status?.repo ? git.marks : {});
+  function markClass(m: string | undefined): string {
+    if (!m) return "none";
+    if (m === "A" || m === "U") return "add";
+    if (m === "D" || m === "!") return "del";
+    if (m === "dot") return "dir";
+    return "mod";
+  }
 </script>
 
 <div class="files">
@@ -159,6 +170,7 @@
       <p class="px-3 py-2 text-fg-muted">{t("files.empty")}</p>
     {/if}
     {#each rows as { node, depth } (node.path)}
+      {@const mark = marks[node.path]}
       <button
         class="row"
         class:on={viewing === node.path}
@@ -180,7 +192,12 @@
           {/if}
         </span>
         <FileIcon path={node.name} folder={node.dir} open={!!expanded[node.path]} size={15} />
-        <span class="truncate">{node.name}</span>
+        <span class="truncate g-{markClass(mark)}">{node.name}</span>
+        {#if mark === "dot"}
+          <span class="gdot" aria-hidden="true"></span>
+        {:else if mark}
+          <span class="gmark g-{markClass(mark)}" title={t("files.gitMark", { letter: mark })}>{mark}</span>
+        {/if}
       </button>
     {/each}
   </div>
@@ -225,6 +242,30 @@
   }
   .row.ignored {
     color: var(--fg-faint);
+  }
+  .g-mod {
+    color: var(--warn);
+  }
+  .g-add {
+    color: var(--add);
+  }
+  .g-del {
+    color: var(--del);
+  }
+  .gmark {
+    margin-inline-start: auto;
+    padding-inline-start: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .gdot {
+    margin-inline-start: auto;
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--fg-faint);
   }
   .pinned {
     padding-inline-start: 10px;

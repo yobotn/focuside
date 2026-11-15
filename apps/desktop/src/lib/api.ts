@@ -109,7 +109,78 @@ export const api = {
     invoke<{ id: string | null; files: FileMatches[]; failed: [string, string][]; undo: boolean }>("fs_replace", { projectId, query, replace, paths }),
   fsReplaceUndo: (projectId: string, id: string) =>
     invoke<{ restored: string[]; skipped: string[]; failed: [string, string][] }>("fs_replace_undo", { projectId, id }),
+
+  // The project's own git repository (Git panel). Paths are relative to the repository root.
+  gitStatus: (projectId: string) => invoke<GitStatus>("git_status", { projectId }),
+  gitInit: (projectId: string) => invoke<void>("git_init", { projectId }),
+  gitStage: (projectId: string, paths: string[]) => invoke<void>("git_stage", { projectId, paths }),
+  gitStageAll: (projectId: string) => invoke<void>("git_stage_all", { projectId }),
+  gitUnstage: (projectId: string, paths: string[]) => invoke<void>("git_unstage", { projectId, paths }),
+  gitUnstageAll: (projectId: string) => invoke<void>("git_unstage_all", { projectId }),
+  gitDiscard: (projectId: string, tracked: string[], untracked: string[]) => invoke<void>("git_discard", { projectId, tracked, untracked }),
+  /** Returns the short id of the new commit. With `all`, every change is staged first. */
+  gitCommit: (projectId: string, message: string, all: boolean) => invoke<string>("git_commit", { projectId, message, all }),
+  gitBranches: (projectId: string) => invoke<GitBranch[]>("git_branches", { projectId }),
+  gitSwitch: (projectId: string, name: string, remote: boolean) => invoke<void>("git_switch", { projectId, name, remote }),
+  gitCreateBranch: (projectId: string, name: string) => invoke<void>("git_create_branch", { projectId, name }),
+  gitFetch: (projectId: string) => invoke<void>("git_fetch", { projectId }),
+  gitPull: (projectId: string) => invoke<void>("git_pull", { projectId }),
+  gitPush: (projectId: string, hasUpstream: boolean) => invoke<void>("git_push", { projectId, hasUpstream }),
+  gitLog: (projectId: string, limit: number) => invoke<GitCommit[]>("git_log", { projectId, limit }),
+  gitCommitFiles: (projectId: string, hash: string) => invoke<GitCommitFile[]>("git_commit_files", { projectId, hash }),
+  gitVersions: (projectId: string, source: GitDiffSource, path: string, orig: string | null) =>
+    invoke<FileVersions>("git_versions", { projectId, source, path, orig }),
+  gitHeadText: (projectId: string, path: string) => invoke<string | null>("git_head_text", { projectId, path }),
 };
+
+/** One changed path (git status --porcelain=v2). `x` is the index letter, `y` the work tree letter, "." for none. */
+export interface GitEntry {
+  path: string;
+  orig?: string;
+  x: string;
+  y: string;
+  kind: "change" | "rename" | "conflict" | "untracked";
+}
+
+export interface GitStatus {
+  /** False when the project is not in a git repository. */
+  repo: boolean;
+  root: string;
+  /** The project folder inside the repository, with a trailing slash, or "". */
+  prefix: string;
+  branch: string | null;
+  head: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  entries: GitEntry[];
+  truncated: boolean;
+}
+
+export interface GitBranch {
+  name: string;
+  remote: boolean;
+  current: boolean;
+  upstream?: string;
+}
+
+export interface GitCommit {
+  hash: string;
+  short: string;
+  author: string;
+  /** Unix seconds. */
+  time: number;
+  subject: string;
+}
+
+export interface GitCommitFile {
+  status: string;
+  path: string;
+  orig?: string;
+}
+
+/** Which change a git diff tab shows. */
+export type GitDiffSource = { kind: "unstaged" } | { kind: "staged" } | { kind: "commit"; hash: string };
 
 /** A file as the viewer reads it (files::FileContent). */
 export type FileContent =

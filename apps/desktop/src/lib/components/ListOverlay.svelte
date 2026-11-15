@@ -24,6 +24,7 @@
     empty = t("palette.empty"),
     searchable = true,
     mono = false,
+    extra,
     onclose,
   }: {
     title?: string;
@@ -32,6 +33,8 @@
     empty?: string;
     searchable?: boolean;
     mono?: boolean;
+    /** Items built from the typed text, shown after the matches and not filtered (for example "Create branch"). */
+    extra?: (query: string) => ListItem[];
     onclose: () => void;
   } = $props();
 
@@ -41,7 +44,10 @@
   let list: HTMLUListElement | undefined = $state();
   let panel: HTMLDivElement | undefined = $state();
 
-  const shown = $derived(searchable ? filter(items, query, (i) => i.label + (i.detail ? " " + i.detail : ""), 200) : items);
+  const shown = $derived([
+    ...(searchable ? filter(items, query, (i) => i.label + (i.detail ? " " + i.detail : ""), 200) : items),
+    ...(extra?.(query) ?? []),
+  ]);
 
   $effect(() => {
     void query;
