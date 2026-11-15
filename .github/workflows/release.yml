@@ -72,7 +72,13 @@ jobs:
 
             Claude panes track turns with an observe-only plugin that FocusIDE passes with --plugin-dir to the panes it starts. It is on by default and does not change your Claude settings. Turn it off in Settings.
 
-            New agents: Antigravity CLI, Copilot CLI, Cursor CLI, Kiro CLI, Cline, Kimi Code and Mistral Vibe. Install them yourself; FocusIDE does not install agents. Antigravity CLI opens in a pane, and FocusIDE asks once before chat mode.
+            New in this version:
+            - FocusIDE opens where you left it: projects, session tabs, panels, open files, plans, prompts and changes. Claude panes resume their own conversation.
+            - Editor: file tabs with preview, unsaved changes, find and replace, go to line, quick open (Ctrl+P), commands (Ctrl+Shift+P) and search across files.
+            - Prompts panel: a conversation view with only prompts and answers, step with Alt+Up and Alt+Down, search, and undo back to a prompt.
+            - Review of changes: undo one change or one file, keep files, review all files of a turn or a session, inline or side by side.
+            - Git panel (Ctrl+Shift+G): stage, commit, branches, pull, push and history, with change markers in the editor.
+            - Status bar, session tab states, notification settings and a shortcuts sheet (Ctrl+/).
 
             Found a problem? [Open an issue](https://github.com/yobotn/focuside/issues/new/choose).
           releaseDraft: true

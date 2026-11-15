@@ -1206,7 +1206,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "focuside-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "flate2",
@@ -1232,7 +1232,7 @@ dependencies = [
 
 [[package]]
 name = "focuside-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "focuside-hook"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "tempfile",
@@ -1267,7 +1267,7 @@ dependencies = [
 
 [[package]]
 name = "focuside-spike"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "focuside-core",
